@@ -1,0 +1,27 @@
+# Build directories
+build/
+bin/
+out/
+
+# Executables
+hardware_node
+candidate_template
+
+# Object & static libraries
+*.o
+*.obj
+*.so
+*.a
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
