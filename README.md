@@ -1,11 +1,6 @@
 # Robo-PS
 
-This repository contains the problem statements for the Robo-PS problem sets.
-
-## Problem Sets
-
-* `problem_statements.pdf`
-* `problem_statement_2.pdf`
+This repository contains the problem statements for the robotics.
 
 ## Objective
 
