@@ -1,1 +1,35 @@
-.vscode
+# Model weights and checkpoints
+*.pt
+*.pth
+*.weights
+*.onnx
+*.engine
+*.trt
+*.bin
+*.safetensors
+
+# Ultralytics/runs
+runs/
+weights/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+*.npz
+*.npy
+data/
+datasets/
