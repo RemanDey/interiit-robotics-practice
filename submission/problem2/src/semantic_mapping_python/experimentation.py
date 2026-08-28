@@ -21,7 +21,7 @@ def process_frame(frame):
     cv2.imshow("Segmented Mask", mask_overlay)
 
 if len(sys.argv) > 1:
-    image_path = 2#sys.argv[1]
+    image_path = sys.argv[1]
     frame = cv2.imread(image_path)
     if frame is None:
         print(f"Error: Could not load image '{image_path}'")
@@ -29,7 +29,7 @@ if len(sys.argv) > 1:
     process_frame(frame)
     cv2.waitKey(0)
 else:
-    cap = cv2.VideoCapture(2, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
