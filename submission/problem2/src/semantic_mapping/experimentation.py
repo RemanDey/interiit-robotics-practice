@@ -1,17 +1,12 @@
+import sys
 import cv2
 import numpy as np
 from ultralytics import YOLO
 
 model = YOLO("yolov8n-seg.pt")
 
-cap = cv2.VideoCapture(0)
-
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
-
-    results = model(frame, verbose=True)
+def process_frame(frame):
+    results = model(frame, verbose=False)
 
     annotated_frame = results[0].plot()
 
@@ -25,8 +20,23 @@ while cap.isOpened():
     cv2.imshow("Original + Segmentation", annotated_frame)
     cv2.imshow("Segmented Mask", mask_overlay)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+if len(sys.argv) > 1:
+    image_path = 2#sys.argv[1]
+    frame = cv2.imread(image_path)
+    if frame is None:
+        print(f"Error: Could not load image '{image_path}'")
+        sys.exit(1)
+    process_frame(frame)
+    cv2.waitKey(0)
+else:
+    cap = cv2.VideoCapture(2, cv2.CAP_V4L2)
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        process_frame(frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    cap.release()
 
-cap.release()
 cv2.destroyAllWindows()

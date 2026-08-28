@@ -33,3 +33,7 @@ Thumbs.db
 *.npy
 data/
 datasets/
+
+submission/problem2/build/
+submission/problem2/log/
+submission/problem2/install/
