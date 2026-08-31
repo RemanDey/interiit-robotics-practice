@@ -15,8 +15,8 @@ setup(
     zip_safe=True,
     maintainer='remandey',
     maintainer_email='reman.airport@gmail.com',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    description='YOLOv8 segmentation perception node',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',
@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'perception_segmentor = perception.semantic_segmentation:main',
         ],
     },
 )

@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 import cv2
 import numpy as np
 import rclpy
@@ -10,6 +11,10 @@ from sensor_msgs.msg import Image, CameraInfo
 from std_msgs.msg import String
 from ultralytics import YOLO
 import message_filters
+import tf2_ros
+from tf2_geometry_msgs import do_transform_point
+from geometry_msgs.msg import PointStamped
+from scipy.linalg import block_diag
 
 
 def imgmsg_to_cv2_direct(msg: Image) -> np.ndarray:
@@ -33,11 +38,9 @@ def imgmsg_to_cv2_direct(msg: Image) -> np.ndarray:
 def depthmsg_to_cv2_direct(msg: Image) -> np.ndarray:
     """Directly converts a ROS 2 Depth Image message to a float32 depth map (in meters)."""
     if msg.encoding == '16UC1':
-        # Depth in millimeters -> convert to meters
         depth = np.frombuffer(msg.data, dtype=np.uint16).reshape((msg.height, msg.width))
         return depth.astype(np.float32) / 1000.0
     elif msg.encoding == '32FC1':
-        # Depth already in meters
         depth = np.frombuffer(msg.data, dtype=np.float32).reshape((msg.height, msg.width))
         return depth
     else:
@@ -61,20 +64,84 @@ def cv2_to_imgmsg_direct(cv_image: np.ndarray, header, encoding: str = 'bgr8') -
     return msg
 
 
+class KalmanTracker:
+    """Constant velocity Kalman filter for 2D world position tracking."""
+
+    def __init__(self, initial_pos, track_id, label, confidence):
+        self.x = np.array([initial_pos[0], initial_pos[1], 0.0, 0.0])
+        self.P = np.eye(4) * 100.0
+        self.F = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0], [0, 0, 0, 1]])
+        self.H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]])
+        self.Q = block_diag(np.eye(2) * 0.01, np.eye(2) * 0.1)
+        self.R = np.eye(2) * 0.05
+        self.track_id = track_id
+        self.label = label
+        self.confidence = confidence
+        self.last_update_time = time.time()
+        self.hits = 1
+        self.missed = 0
+
+    def predict(self):
+        self.x = self.F @ self.x
+        self.P = self.F @ self.P @ self.F.T + self.Q
+        return self.x[:2].copy()
+
+    def update(self, measurement, confidence):
+        z = np.array(measurement)
+        y = z - self.H @ self.x
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+        self.x = self.x + K @ y
+        self.P = (np.eye(4) - K @ self.H) @ self.P
+        self.confidence = 0.9 * self.confidence + 0.1 * confidence
+        self.hits += 1
+        self.missed = 0
+        self.last_update_time = time.time()
+
+    def get_position(self):
+        return [float(self.x[0]), float(self.x[1]), 0.0]
+
+    def increment_missed(self):
+        self.missed += 1
+
+
+class Timer:
+    """Simple context manager for timing code blocks."""
+
+    def __init__(self, name, logger, enabled=True):
+        self.name = name
+        self.logger = logger
+        self.enabled = enabled
+        self.start = 0.0
+        self.elapsed = 0.0
+
+    def __enter__(self):
+        if self.enabled:
+            self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args):
+        if self.enabled:
+            self.elapsed = (time.perf_counter() - self.start) * 1000.0
+
+
 class PerceptionSegmentorNode(Node):
 
     def __init__(self):
         super().__init__('perception_segmentor_node')
 
-        # Parameters
         self.declare_parameter('model_name', 'yolov8n-seg.pt')
         self.declare_parameter('image_topic', '/oakd/rgb/preview/image_raw')
-        self.declare_parameter('depth_topic', '/oakd/stereo/image_raw')
+        self.declare_parameter('depth_topic', '/oakd/rgb/preview/depth')
         self.declare_parameter('camera_info_topic', '/oakd/rgb/preview/camera_info')
         self.declare_parameter('perception_topic', '/perception')
         self.declare_parameter('mask_topic', '/perception_mask')
         self.declare_parameter('classification_topic', '/perception_classification')
-        self.declare_parameter('json_output_path', 'detected_objects_3d.json')
+        self.declare_parameter('json_output_path', 'semantic_map.json')
+        self.declare_parameter('target_frame', 'map')
+        self.declare_parameter('dedup_threshold', 0.5)
+        self.declare_parameter('max_missed', 30)
+        self.declare_parameter('benchmark_enabled', True)
 
         model_name = self.get_parameter('model_name').get_parameter_value().string_value
         image_topic = self.get_parameter('image_topic').get_parameter_value().string_value
@@ -84,19 +151,17 @@ class PerceptionSegmentorNode(Node):
         mask_topic = self.get_parameter('mask_topic').get_parameter_value().string_value
         classification_topic = self.get_parameter('classification_topic').get_parameter_value().string_value
         self.json_output_path = self.get_parameter('json_output_path').get_parameter_value().string_value
+        self.target_frame = self.get_parameter('target_frame').get_parameter_value().string_value
+        self.dedup_threshold = self.get_parameter('dedup_threshold').get_parameter_value().double_value
+        self.max_missed = self.get_parameter('max_missed').get_parameter_value().integer_value
+        self.benchmark_enabled = self.get_parameter('benchmark_enabled').get_parameter_value().bool_value
 
-        # Load YOLO model
         self.get_logger().info(f'Loading YOLO model: {model_name}...')
         self.model = YOLO(model_name)
 
-        # Track seen object IDs across all frames
-        self.seen_track_ids = set()
-
-        # Camera Intrinsics Matrix K = [fx, 0, cx, 0, fy, cy, 0, 0, 1]
         self.intrinsics = None
         self.create_subscription(CameraInfo, camera_info_topic, self.camera_info_callback, 10)
 
-        # Synchronized RGB and Depth Subscriptions
         self.rgb_sub = message_filters.Subscriber(self, Image, image_topic)
         self.depth_sub = message_filters.Subscriber(self, Image, depth_topic)
 
@@ -105,16 +170,32 @@ class PerceptionSegmentorNode(Node):
         )
         self.ts.registerCallback(self.synchronized_callback)
 
-        # ROS 2 Publishers
         self.json_publisher_ = self.create_publisher(String, perception_topic, 10)
         self.mask_publisher_ = self.create_publisher(Image, mask_topic, 10)
         self.classification_publisher_ = self.create_publisher(Image, classification_topic, 10)
+
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+
+        self.trackers = {}
+        self.next_persistent_id = 1
+
+        self.frame_count = 0
+        self.latencies = {
+            'inference': [],
+            'projection': [],
+            'tf_lookup': [],
+            'deduplication': [],
+            'total': []
+        }
+        self.memory_samples = []
 
         self.get_logger().info(
             f'Perception node initialized.\n'
             f' - RGB Input: {image_topic}\n'
             f' - Depth Input: {depth_topic}\n'
             f' - Camera Info: {camera_info_topic}\n'
+            f' - Target Frame: {self.target_frame}\n'
             f' - Output JSON File: {self.json_output_path}'
         )
 
@@ -129,8 +210,11 @@ class PerceptionSegmentorNode(Node):
             self.get_logger().info('Camera intrinsics successfully received.')
 
     def synchronized_callback(self, rgb_msg: Image, depth_msg: Image):
+        total_timer = Timer('total', self.get_logger(), self.benchmark_enabled)
+        total_timer.__enter__()
+
         if self.intrinsics is None:
-            self.get_logger().warn_throttle(2.0, 'Waiting for CameraInfo intrinsics...')
+            self.get_logger().warn(2.0, 'Waiting for CameraInfo intrinsics...')
             return
 
         try:
@@ -140,14 +224,13 @@ class PerceptionSegmentorNode(Node):
             self.get_logger().error(f'Failed to convert ROS images: {e}')
             return
 
-        # Run ByteTrack tracking with YOLO segmentor
-        results = self.model.track(
-            frame, persist=True, tracker='bytetrack.yaml', verbose=False
-        )[0]
+        with Timer('inference', self.get_logger(), self.benchmark_enabled) as t:
+            results = self.model.track(
+                frame, persist=True, tracker='bytetrack.yaml', verbose=False
+            )[0]
+        if self.benchmark_enabled:
+            self.latencies['inference'].append(t.elapsed)
 
-        # -------------------------------------------------------------
-        # 1. Process & Publish Annotated Bounding Box Image
-        # -------------------------------------------------------------
         annotated_frame = results.plot()
         annotated_frame_bgr = np.ascontiguousarray(annotated_frame, dtype=np.uint8)
 
@@ -157,9 +240,6 @@ class PerceptionSegmentorNode(Node):
         except Exception as e:
             self.get_logger().error(f'Failed to publish classification image: {e}')
 
-        # -------------------------------------------------------------
-        # 2. Process & Publish Mask Image
-        # -------------------------------------------------------------
         mask_overlay = np.zeros_like(frame)
 
         if results.masks is not None:
@@ -178,14 +258,11 @@ class PerceptionSegmentorNode(Node):
         except Exception as e:
             self.get_logger().error(f'Failed to publish mask image: {e}')
 
-        # -------------------------------------------------------------
-        # 3. Process Instance Depth & Calculate 3D Coordinates
-        # -------------------------------------------------------------
-        new_objects = []
+        new_detections = []
 
         if (
-            results.boxes is not None 
-            and results.boxes.id is not None 
+            results.boxes is not None
+            and results.boxes.id is not None
             and results.masks is not None
         ):
             track_ids = results.boxes.id.int().cpu().tolist()
@@ -196,7 +273,6 @@ class PerceptionSegmentorNode(Node):
             for idx, (track_id, cls_id, conf) in enumerate(
                 zip(track_ids, class_ids, confidences)
             ):
-                # Extract object-specific binary mask
                 obj_mask = masks_tensor[idx].astype(np.uint8)
                 if obj_mask.shape[:2] != depth_map.shape[:2]:
                     obj_mask = cv2.resize(
@@ -209,76 +285,145 @@ class PerceptionSegmentorNode(Node):
                 if not np.any(mask_bool):
                     continue
 
-                # Sample valid depth values within the object mask
                 mask_depths = depth_map[mask_bool]
                 valid_depths = mask_depths[(mask_depths > 0) & (~np.isnan(mask_depths))]
 
                 if len(valid_depths) == 0:
                     continue
 
-                # Median depth (robust against noisy edge values)
-                z_dist = float(np.median(valid_depths))
+                with Timer('projection', self.get_logger(), self.benchmark_enabled) as t:
+                    min_z = float(np.min(valid_depths))
+                    min_z_indices = np.where((depth_map == min_z) & mask_bool)
+                    if len(min_z_indices[0]) > 0:
+                        u_min = float(min_z_indices[1][0])
+                        v_min = float(min_z_indices[0][0])
+                    else:
+                        v_indices, u_indices = np.where(mask_bool)
+                        u_min = float(np.mean(u_indices))
+                        v_min = float(np.mean(v_indices))
+                        min_z = float(np.median(valid_depths))
 
-                # Calculate 2D centroid of mask
-                v_indices, u_indices = np.where(mask_bool)
-                u_center = float(np.mean(u_indices))
-                v_center = float(np.mean(v_indices))
+                    x_cam = (u_min - self.intrinsics['cx']) * min_z / self.intrinsics['fx']
+                    y_cam = (v_min - self.intrinsics['cy']) * min_z / self.intrinsics['fy']
 
-                # Deproject 2D centroid to 3D camera frame coordinates (X, Y, Z)
-                x_coord = (u_center - self.intrinsics['cx']) * z_dist / self.intrinsics['fx']
-                y_coord = (v_center - self.intrinsics['cy']) * z_dist / self.intrinsics['fy']
+                    point_camera = PointStamped()
+                    point_camera.header = rgb_msg.header
+                    point_camera.header.frame_id = 'oakd_rgb_camera_optical_frame'
+                    point_camera.point.x = x_cam
+                    point_camera.point.y = y_cam
+                    point_camera.point.z = min_z
+
+                    try:
+                        with Timer('tf_lookup', self.get_logger(), self.benchmark_enabled) as tf_timer:
+                            transform = self.tf_buffer.lookup_transform(
+                                self.target_frame,
+                                point_camera.header.frame_id,
+                                rclpy.time.Time.from_msg(rgb_msg.header.stamp),
+                                timeout=rclpy.duration.Duration(seconds=0.1)
+                            )
+                        if self.benchmark_enabled:
+                            self.latencies['tf_lookup'].append(tf_timer.elapsed)
+
+                        point_world = do_transform_point(point_camera, transform)
+                        floor_point = [point_world.point.x, point_world.point.y, 0.0]
+
+                    except tf2_ros.TransformException as e:
+                        self.get_logger().warn_throttle(2.0, f'TF lookup failed: {e}')
+                        continue
+                if self.benchmark_enabled:
+                    self.latencies['projection'].append(t.elapsed)
 
                 class_name = self.model.names[cls_id]
 
-                object_entry = {
-                    'track_id': track_id,
+                with Timer('deduplication', self.get_logger(), self.benchmark_enabled) as t:
+                    best_match_id = None
+                    best_dist = self.dedup_threshold
+
+                    for pid, tracker in self.trackers.items():
+                        pred_pos = tracker.predict()
+                        dist = np.linalg.norm(np.array(floor_point[:2]) - pred_pos)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_match_id = pid
+
+                    if best_match_id is not None:
+                        self.trackers[best_match_id].update(floor_point[:2], conf)
+                        persistent_id = best_match_id
+                    else:
+                        persistent_id = self.next_persistent_id
+                        self.next_persistent_id += 1
+                        self.trackers[persistent_id] = KalmanTracker(
+                            floor_point, persistent_id, class_name, conf
+                        )
+                if self.benchmark_enabled:
+                    self.latencies['deduplication'].append(t.elapsed)
+
+                new_detections.append({
+                    'persistent_id': persistent_id,
                     'class': class_name,
                     'confidence': round(conf, 4),
-                    'distance_m': round(z_dist, 3),
-                    'centroid_2d': [round(u_center, 1), round(v_center, 1)],
-                    'coordinates_3d': {
-                        'x': round(x_coord, 3),
-                        'y': round(y_coord, 3),
-                        'z': round(z_dist, 3)
-                    },
-                    'timestamp': rgb_msg.header.stamp.sec + rgb_msg.header.stamp.nanosec * 1e-9
-                }
+                    'floor_position': floor_point
+                })
 
-                # Publish each unique detection once (or continuously if preferred)
-                if track_id not in self.seen_track_ids:
-                    self.seen_track_ids.add(track_id)
-                    object_entry['total_unique_seen'] = len(self.seen_track_ids)
-                    new_objects.append(object_entry)
+        stale = [pid for pid, t in self.trackers.items() if t.missed > self.max_missed]
+        for pid in stale:
+            del self.trackers[pid]
 
-        if new_objects:
-            # Publish JSON string to ROS 2 topic
-            json_msg = String()
-            json_msg.data = json.dumps(new_objects)
-            self.json_publisher_.publish(json_msg)
+        for tracker in self.trackers.values():
+            if tracker.missed == 0:
+                tracker.increment_missed()
 
-            # Write detections to local file disk
-            self.append_to_json_file(new_objects)
+        if new_detections or self.frame_count % 30 == 0:
+            self.write_semantic_map()
 
-            self.get_logger().info(
-                f'Published & Saved {len(new_objects)} new object(s) with 3D coordinates.'
-            )
+        self.frame_count += 1
+        total_timer.__exit__()
+        if self.benchmark_enabled:
+            self.latencies['total'].append(total_timer.elapsed)
 
-    def append_to_json_file(self, data_list):
-        """Appends spatial detection records to a local JSON file."""
-        file_path = self.json_output_path
-        existing_data = []
+        if self.benchmark_enabled and self.frame_count % 100 == 0:
+            self.log_benchmarks()
 
-        if os.path.exists(file_path):
-            try:
-                with open(file_path, 'r') as f:
-                    existing_data = json.load(f)
-            except (json.JSONDecodeError, FileNotFoundError):
-                existing_data = []
+    def write_semantic_map(self):
+        output_data = []
+        for pid, tracker in self.trackers.items():
+            pos = tracker.get_position()
+            output_data.append({
+                "id": pid,
+                "label": tracker.label,
+                "position": pos,
+                "confidence": round(tracker.confidence, 4)
+            })
 
-        existing_data.extend(data_list)
+        try:
+            with open(self.json_output_path, 'w') as f:
+                json.dump(output_data, f, indent=2)
+        except Exception as e:
+            self.get_logger().error(f'Failed to write semantic map: {e}')
 
-        with open(file_path, 'w') as f:
-            json.dump(existing_data, f, indent=4)
+        json_msg = String()
+        json_msg.data = json.dumps(output_data)
+        self.json_publisher_.publish(json_msg)
+
+        if self.frame_count % 30 == 0 or new_detections:
+            self.get_logger().info(f'Semantic map updated: {len(output_data)} objects')
+
+    def log_benchmarks(self):
+        import psutil
+        process = psutil.Process(os.getpid())
+        mem_mb = process.memory_info().rss / 1024 / 1024
+        self.memory_samples.append(mem_mb)
+
+        self.get_logger().info(f'--- Benchmark (frame {self.frame_count}) ---')
+        for stage, times in self.latencies.items():
+            if times:
+                recent = times[-100:]
+                avg = np.mean(recent)
+                p95 = np.percentile(recent, 95)
+                self.get_logger().info(f'  {stage}: avg={avg:.1f}ms p95={p95:.1f}ms')
+        if self.memory_samples:
+            peak = max(self.memory_samples)
+            self.get_logger().info(f'  RAM: current={mem_mb:.0f}MB peak={peak:.0f}MB')
 
 
 def main(args=None):
