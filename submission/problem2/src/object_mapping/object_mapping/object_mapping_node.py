@@ -318,7 +318,7 @@ class PerceptionSegmentorNode(Node):
                             transform = self.tf_buffer.lookup_transform(
                                 self.target_frame,
                                 point_camera.header.frame_id,
-                                rclpy.time.Time.from_msg(rgb_msg.header.stamp),
+                                rclpy.time.Time(),
                                 timeout=rclpy.duration.Duration(seconds=0.1)
                             )
                         if self.benchmark_enabled:
@@ -328,7 +328,7 @@ class PerceptionSegmentorNode(Node):
                         floor_point = [point_world.point.x, point_world.point.y, 0.0]
 
                     except tf2_ros.TransformException as e:
-                        self.get_logger().warn_throttle(2.0, f'TF lookup failed: {e}')
+                        self.get_logger().warn(f'TF lookup failed: {e}')
                         continue
                 if self.benchmark_enabled:
                     self.latencies['projection'].append(t.elapsed)
