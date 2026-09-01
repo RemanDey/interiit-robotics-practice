@@ -1,199 +1,203 @@
 #!/usr/bin/env python3
 
 import json
-import cv2
 import numpy as np
+import cv2
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CameraInfo
 from std_msgs.msg import String
+from geometry_msgs.msg import PointStamped
+from tf2_ros import Buffer, TransformListener
+from tf2_geometry_msgs import do_transform_point
+import message_filters
 from ultralytics import YOLO
+from image_geometry import PinholeCameraModel
 
 
 def imgmsg_to_cv2_direct(msg: Image) -> np.ndarray:
-    """Directly converts a ROS 2 Image message to an OpenCV BGR numpy array
-
-    bypassing cv_bridge to prevent NumPy 2.x ABI issues.
-    """
-    dtype = np.uint8
+    """Converts ROS 2 Image directly to NumPy array without cv_bridge."""
     if msg.encoding in ['bgr8', 'rgb8']:
         channels = 3
-    elif msg.encoding == 'mono8':
+    elif msg.encoding in ['mono8', '16UC1']:
         channels = 1
     else:
-        raise ValueError(f'Unsupported encoding for direct conversion: {msg.encoding}')
+        raise ValueError(f'Unsupported encoding: {msg.encoding}')
 
-    frame = np.frombuffer(msg.data, dtype=dtype).reshape((msg.height, msg.width, channels))
-
-    if msg.encoding == 'rgb8':
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    if msg.encoding == '16UC1':
+        # Depth maps in millimeters (uint16)
+        frame = np.frombuffer(msg.data, dtype=np.uint16).reshape((msg.height, msg.width))
+    else:
+        frame = np.frombuffer(msg.data, dtype=np.uint8).reshape((msg.height, msg.width, channels))
+        if msg.encoding == 'rgb8':
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     return frame
 
 
-def cv2_to_imgmsg_direct(cv_image: np.ndarray, header, encoding: str = 'bgr8') -> Image:
-    """Directly converts an OpenCV image array to a ROS 2 Image message
-
-    bypassing cv_bridge to prevent NumPy 2.x ABI issues (KeyError: 16).
-    """
-    msg = Image()
-    msg.header = header
-    msg.height, msg.width = cv_image.shape[:2]
-
-    if encoding == 'bgr8':
-        msg.encoding = 'bgr8'
-        msg.is_bigendian = 0
-        msg.step = msg.width * 3
-        msg.data = cv_image.tobytes()
-    else:
-        raise ValueError(f'Unsupported encoding for direct conversion: {encoding}')
-
-    return msg
-
-
-class PerceptionSegmentorNode(Node):
+class Object3DMapperNode(Node):
 
     def __init__(self):
-        super().__init__('perception_segmentor_node')
+        super().__init__('object_3d_mapper_node')
 
         # Parameters
         self.declare_parameter('model_name', 'yolov8n-seg.pt')
-        self.declare_parameter('image_topic', '/oakd/rgb/preview/image_raw')
-        self.declare_parameter('perception_topic', '/perception')
-        self.declare_parameter('mask_topic', '/perception_mask')
-        self.declare_parameter('classification_topic', '/perception_classification')
+        self.declare_parameter('rgb_topic', '/oakd/rgb/preview/image_raw')
+        self.declare_parameter('depth_topic', '/oakd/rgb/preview/depth')
+        self.declare_parameter('camera_info_topic', '/oakd/rgb/preview/camera_info')
+        self.declare_parameter('map_frame', 'map')
+        self.declare_parameter('json_output_topic', '/perception/3d_map')
 
-        model_name = (
-            self.get_parameter('model_name').get_parameter_value().string_value
-        )
-        image_topic = (
-            self.get_parameter('image_topic').get_parameter_value().string_value
-        )
-        perception_topic = (
-            self.get_parameter('perception_topic').get_parameter_value().string_value
-        )
-        mask_topic = (
-            self.get_parameter('mask_topic').get_parameter_value().string_value
-        )
-        classification_topic = (
-            self.get_parameter('classification_topic').get_parameter_value().string_value
-        )
+        model_name = self.get_parameter('model_name').value
+        rgb_topic = self.get_parameter('rgb_topic').value
+        depth_topic = self.get_parameter('depth_topic').value
+        camera_info_topic = self.get_parameter('camera_info_topic').value
+        self.map_frame = self.get_parameter('map_frame').value
+        json_output_topic = self.get_parameter('json_output_topic').value
 
-        # Load YOLO model
-        self.get_logger().info(f'Loading YOLO model: {model_name}...')
+        # YOLO Model & Tracking
         self.model = YOLO(model_name)
+        self.tracked_objects = {}  # Store tracked objects by track_id
 
-        # Track seen object IDs across all frames
-        self.seen_track_ids = set()
+        # Camera Geometry & TF Buffer
+        self.camera_model = PinholeCameraModel()
+        self.has_camera_info = False
 
-        # ROS 2 Subscriptions & Publishers
-        self.subscription = self.create_subscription(
-            Image, image_topic, self.image_callback, 10
-        )
-        self.json_publisher_ = self.create_publisher(
-            String, perception_topic, 10
-        )
-        self.mask_publisher_ = self.create_publisher(Image, mask_topic, 10)
-        self.classification_publisher_ = self.create_publisher(
-            Image, classification_topic, 10
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        # Camera Info Subscriber (Once)
+        self.info_sub = self.create_subscription(
+            CameraInfo, camera_info_topic, self.camera_info_callback, 10
         )
 
-        self.get_logger().info(
-            f'Perception node initialized.\n'
-            f' - Input: {image_topic}\n'
-            f' - JSON Output: {perception_topic}\n'
-            f' - Mask Output: {mask_topic}\n'
-            f' - Bounding Box Output: {classification_topic}'
+        # Synchronized RGB & Depth Subscribers
+        self.rgb_sub = message_filters.Subscriber(self, Image, rgb_topic)
+        self.depth_sub = message_filters.Subscriber(self, Image, depth_topic)
+        
+        self.ts = message_filters.ApproximateTimeSynchronizer(
+            [self.rgb_sub, self.depth_sub], queue_size=10, slop=0.1
         )
+        self.ts.registerCallback(self.perception_callback)
 
-    def image_callback(self, msg: Image):
-        try:
-            # Convert ROS Image message to OpenCV BGR array directly
-            frame = imgmsg_to_cv2_direct(msg)
-        except Exception as e:
-            self.get_logger().error(f'Failed to convert ROS image: {e}')
+        # JSON Publisher
+        self.json_pub = self.create_publisher(String, json_output_topic, 10)
+
+        self.get_logger().info("3D Object Mapper Node Initialized.")
+
+    def camera_info_callback(self, info_msg: CameraInfo):
+        if not self.has_camera_info:
+            self.camera_model.fromCameraInfo(info_msg)
+            self.has_camera_info = True
+            self.get_logger().info("Camera Intrinsics Loaded.")
+
+    def perception_callback(self, rgb_msg: Image, depth_msg: Image):
+        if not self.has_camera_info:
+            self.get_logger().warn("Waiting for CameraInfo...", throttle_duration_sec=2.0)
             return
 
-        # Run ByteTrack algorithm using YOLO segmentor model
+        # Convert Image Messages
+        try:
+            rgb_image = imgmsg_to_cv2_direct(rgb_msg)
+            depth_image = imgmsg_to_cv2_direct(depth_msg)
+        except Exception as e:
+            self.get_logger().error(f"Image conversion failed: {e}")
+            return
+
+        # Run ByteTrack Segmentation
         results = self.model.track(
-            frame, persist=True, tracker='bytetrack.yaml', verbose=False
+            rgb_image, persist=True, tracker='bytetrack.yaml', verbose=False
         )[0]
 
-        # -------------------------------------------------------------
-        # 1. Process & Publish Bounded Box Image (/perception_classification)
-        # -------------------------------------------------------------
-        annotated_frame = results.plot()
-        annotated_frame_bgr = np.ascontiguousarray(annotated_frame, dtype=np.uint8)
+        if results.boxes is None or results.boxes.id is None or results.masks is None:
+            return
 
-        try:
-            bbox_msg = cv2_to_imgmsg_direct(annotated_frame_bgr, msg.header, encoding='bgr8')
-            self.classification_publisher_.publish(bbox_msg)
-        except Exception as e:
-            self.get_logger().error(f'Failed to publish classification image: {e}')
+        track_ids = results.boxes.id.int().cpu().tolist()
+        class_ids = results.boxes.cls.int().cpu().tolist()
+        confidences = results.boxes.conf.float().cpu().tolist()
+        masks = results.masks.data.cpu().numpy()
 
-        # -------------------------------------------------------------
-        # 2. Process & Publish Mask Image Topic (/perception_mask)
-        # -------------------------------------------------------------
-        mask_overlay = np.zeros_like(frame)
-
-        if results.masks is not None:
-            combined_mask = (
-                results.masks.data.any(dim=0).cpu().numpy().astype(np.uint8)
-            )
-
-            if combined_mask.shape[:2] != frame.shape[:2]:
-                combined_mask = cv2.resize(
-                    combined_mask,
-                    (frame.shape[1], frame.shape[0]),
-                    interpolation=cv2.INTER_NEAREST,
+        for track_id, cls_id, conf, mask in zip(track_ids, class_ids, confidences, masks):
+            # Compute centroid of mask (u, v)
+            mask_uint8 = (mask * 255).astype(np.uint8)
+            if mask_uint8.shape != (rgb_image.shape[0], rgb_image.shape[1]):
+                mask_uint8 = cv2.resize(
+                    mask_uint8, (rgb_image.shape[1], rgb_image.shape[0]), interpolation=cv2.INTER_NEAREST
                 )
 
-            mask_overlay = cv2.bitwise_and(frame, frame, mask=combined_mask)
+            moments = cv2.moments(mask_uint8)
+            if moments['m00'] == 0:
+                continue
 
-        try:
-            mask_msg = cv2_to_imgmsg_direct(mask_overlay, msg.header, encoding='bgr8')
-            self.mask_publisher_.publish(mask_msg)
-        except Exception as e:
-            self.get_logger().error(f'Failed to publish mask image: {e}')
+            u = int(moments['m10'] / moments['m00'])
+            v = int(moments['m01'] / moments['m00'])
 
-        # -------------------------------------------------------------
-        # 3. Process & Publish New Objects JSON Topic (/perception)
-        # -------------------------------------------------------------
-        new_objects = []
+            # Sample Median Depth over a 5x5 window around centroid (in meters)
+            depth_crop = depth_image[max(0, v - 2):v + 3, max(0, u - 2):u + 3]
+            valid_depths = depth_crop[depth_crop > 0]
 
-        if results.boxes is not None and results.boxes.id is not None:
-            track_ids = results.boxes.id.int().cpu().tolist()
-            class_ids = results.boxes.cls.int().cpu().tolist()
-            confidences = results.boxes.conf.float().cpu().tolist()
+            if len(valid_depths) == 0:
+                continue
 
-            for track_id, cls_id, conf in zip(
-                track_ids, class_ids, confidences
-            ):
-                if track_id not in self.seen_track_ids:
-                    self.seen_track_ids.add(track_id)
+            # Handle 16-bit depth (mm) vs float depth (m)
+            depth_m = float(np.median(valid_depths))
+            if depth_image.dtype == np.uint16:
+                depth_m /= 1000.0
 
-                    class_name = self.model.names[cls_id]
+            if depth_m <= 0.1 or depth_m > 10.0:  # Ignore out-of-range depths
+                continue
 
-                    new_objects.append({
-                        'id': track_id,
-                        'class': class_name,
-                        'confidence': round(conf, 4),
-                        'total_unique_seen': len(self.seen_track_ids),
-                    })
+            # 3D Ray projection in Camera Optical Frame
+            ray = self.camera_model.projectPixelTo3dRay((u, v))
+            x_c = ray[0] * depth_m
+            y_c = ray[1] * depth_m
+            z_c = ray[2] * depth_m
 
-        if new_objects:
+            # Create PointStamped for TF Transform
+            pt_cam = PointStamped()
+            pt_cam.header = rgb_msg.header
+            pt_cam.point.x = x_c
+            pt_cam.point.y = y_c
+            pt_cam.point.z = z_c
+
+            # Transform Point to Map Frame
+            try:
+                transform = self.tf_buffer.lookup_transform(
+                    self.map_frame,
+                    rgb_msg.header.frame_id,
+                    rclpy.time.Time(),
+                    timeout=rclpy.duration.Duration(seconds=0.1)
+                )
+                pt_map = do_transform_point(pt_cam, transform)
+            except Exception as e:
+                self.get_logger().warn(f"TF Lookup failed ({rgb_msg.header.frame_id} -> {self.map_frame}): {e}")
+                continue
+
+            # Update tracked object database
+            class_name = self.model.names[cls_id]
+            self.tracked_objects[track_id] = {
+                'id': track_id,
+                'class': class_name,
+                'confidence': round(conf, 4),
+                'position_map': {
+                    'x': round(pt_map.point.x, 3),
+                    'y': round(pt_map.point.y, 3),
+                    'z': round(pt_map.point.z, 3),
+                },
+                'frame_id': self.map_frame,
+                'timestamp': rgb_msg.header.stamp.sec + rgb_msg.header.stamp.nanosec * 1e-9
+            }
+
+        # Publish state as JSON
+        if self.tracked_objects:
             json_msg = String()
-            json_msg.data = json.dumps(new_objects)
-            self.json_publisher_.publish(json_msg)
-            self.get_logger().info(
-                f'Published {len(new_objects)} new object(s) to perception topic'
-            )
+            json_msg.data = json.dumps(list(self.tracked_objects.values()), indent=2)
+            self.json_pub.publish(json_msg)
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = PerceptionSegmentorNode()
-
+    node = Object3DMapperNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
