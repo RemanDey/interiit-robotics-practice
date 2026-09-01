@@ -19,7 +19,7 @@ def imgmsg_to_cv2_direct(msg: Image) -> np.ndarray:
     """Converts ROS 2 Image directly to NumPy array without cv_bridge."""
     if msg.encoding in ['bgr8', 'rgb8']:
         channels = 3
-    elif msg.encoding in ['mono8', '16UC1']:
+    elif msg.encoding in ['mono8', '16UC1', '32UC1']:
         channels = 1
     else:
         raise ValueError(f'Unsupported encoding: {msg.encoding}')
@@ -46,7 +46,7 @@ class Object3DMapperNode(Node):
         self.declare_parameter('depth_topic', '/oakd/rgb/preview/depth')
         self.declare_parameter('camera_info_topic', '/oakd/rgb/preview/camera_info')
         self.declare_parameter('map_frame', 'map')
-        self.declare_parameter('json_output_topic', '/perception/3d_map')
+        self.declare_parameter('json_output_topic', '/perception_map')
 
         model_name = self.get_parameter('model_name').value
         rgb_topic = self.get_parameter('rgb_topic').value
