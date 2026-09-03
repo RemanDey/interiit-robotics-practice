@@ -71,8 +71,7 @@ source install/setup.bash
 
 ### 1. Start Gazebo Simulation (small_house world)
 ```bash
-ros2 launch turtlebot4_ignition_bringup turtlebot4_ignition.launch.py \
-    world:=small_house slam:=true nav2:=true rviz:=true model:=lite
+ros2 launch turtlebot4_ignition_bringup turtlebot4_ignition.launch.py slam:=true nav2:=true rviz:=true model:=lite
 ```
 
 ### 2. Launch Semantic Mapping

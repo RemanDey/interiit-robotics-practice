@@ -1,0 +1,134 @@
+{
+  "1": {
+    "id": 1,
+    "class": "dining table",
+    "confidence": 0.4248,
+    "position_map": {
+      "x": 0.92,
+      "y": 0.13,
+      "z": 0.01
+    },
+    "frame_id": "map",
+    "timestamp": 42.933
+  },
+  "23": {
+    "id": 23,
+    "class": "person",
+    "confidence": 0.4818,
+    "position_map": {
+      "x": 1.51,
+      "y": -1.55,
+      "z": 0.02
+    },
+    "frame_id": "map",
+    "timestamp": 63.822
+  },
+  "29": {
+    "id": 29,
+    "class": "person",
+    "confidence": 0.3729,
+    "position_map": {
+      "x": 1.22,
+      "y": -0.97,
+      "z": 0.26
+    },
+    "frame_id": "map",
+    "timestamp": 62.601
+  },
+  "65": {
+    "id": 65,
+    "class": "chair",
+    "confidence": 0.3023,
+    "position_map": {
+      "x": 14.41,
+      "y": -3.89,
+      "z": 0.38
+    },
+    "frame_id": "map",
+    "timestamp": 85.206
+  },
+  "71": {
+    "id": 71,
+    "class": "bench",
+    "confidence": 0.5934,
+    "position_map": {
+      "x": 13.67,
+      "y": -5.29,
+      "z": 0.36
+    },
+    "frame_id": "map",
+    "timestamp": 101.046
+  },
+  "73": {
+    "id": 73,
+    "class": "chair",
+    "confidence": 0.7361,
+    "position_map": {
+      "x": 13.66,
+      "y": -4.03,
+      "z": 0.33
+    },
+    "frame_id": "map",
+    "timestamp": 100.485
+  },
+  "82": {
+    "id": 82,
+    "class": "chair",
+    "confidence": 0.2707,
+    "position_map": {
+      "x": 14.44,
+      "y": -5.19,
+      "z": 0.33
+    },
+    "frame_id": "map",
+    "timestamp": 98.175
+  },
+  "89": {
+    "id": 89,
+    "class": "chair",
+    "confidence": 0.2622,
+    "position_map": {
+      "x": 14.26,
+      "y": -3.66,
+      "z": 0.29
+    },
+    "frame_id": "map",
+    "timestamp": 98.901
+  },
+  "91": {
+    "id": 91,
+    "class": "chair",
+    "confidence": 0.5259,
+    "position_map": {
+      "x": 14.33,
+      "y": -5.04,
+      "z": 0.3
+    },
+    "frame_id": "map",
+    "timestamp": 99.528
+  },
+  "137": {
+    "id": 137,
+    "class": "person",
+    "confidence": 0.8422,
+    "position_map": {
+      "x": 1.4,
+      "y": -1.01,
+      "z": 0.87
+    },
+    "frame_id": "map",
+    "timestamp": 116.061
+  },
+  "138": {
+    "id": 138,
+    "class": "bird",
+    "confidence": 0.6046,
+    "position_map": {
+      "x": 9.32,
+      "y": -2.65,
+      "z": 0.02
+    },
+    "frame_id": "map",
+    "timestamp": 107.745
+  }
+}

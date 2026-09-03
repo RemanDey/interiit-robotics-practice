@@ -95,8 +95,9 @@ class Object3DMapperNode(Node):
 
         # Convert Image Messages
         try:
-            rgb_image = imgmsg_to_cv2_direct(rgb_msg)
-            depth_image = imgmsg_to_cv2_direct(depth_msg)
+            rgb_image = bridge.imgmsg_to_cv2(rgb_msg, desired_encoding='bgr8')
+            
+            depth_image = bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
         except Exception as e:
             self.get_logger().error(f"Image conversion failed: {e}")
             return
@@ -200,19 +201,31 @@ class Object3DMapperNode(Node):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1
                 )
 
-        # Publish debug image
         try:
-            debug_msg = bridge.cv2_to_imgmsg(debug_frame, encoding='bgr8')
-            debug_msg.header = rgb_msg.header
-            self.debug_pub.publish(debug_msg)
-        except Exception as e:
-            self.get_logger().error(f"Failed to publish debug image: {e}")
 
+            debug_msg = bridge.cv2_to_imgmsg(
+                debug_frame,
+                encoding='bgr8'
+            )
+
+            debug_msg.header = rgb_msg.header
+
+            self.debug_pub.publish(debug_msg)
+
+        except Exception as e:
+            import traceback
+            
+            self.get_logger().error(
+                f"Failed to publish debug image: {repr(e)}"
+            )
+            self.get_logger().error(traceback.format_exc())
         # Publish state as JSON
         if self.tracked_objects:
-            json_msg = String()
-            json_msg.data = json.dumps(list(self.tracked_objects.values()), indent=2)
-            self.json_pub.publish(json_msg)
+            # json_msg = String()
+            # json_msg.data = json.dumps(list(self.tracked_objects.values()), indent=2)
+            # self.json_pub.publish(json_msg)
+            with open('map.json', 'w+') as f:
+                json.dump((self.tracked_objects), f,indent=2)
 
 
 def main(args=None):
