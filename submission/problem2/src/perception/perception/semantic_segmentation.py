@@ -16,6 +16,14 @@ import message_filters
 from ultralytics import YOLO
 from image_geometry import PinholeCameraModel
 from cv_bridge import CvBridge
+'''
+{
+  "id": 1,
+  "label": "sofa",
+  "position": [1.2, 3.4, 0.0],
+  "confidence": 0.89
+}
+'''
 
 
 class Object3DMapperNode(Node):
@@ -177,15 +185,13 @@ class Object3DMapperNode(Node):
         class_name = self.model.names[cls_id]
         self.tracked_objects[track_id] = {
             'id': track_id,
-            'class': class_name,
-            'confidence': round(conf, 4),
+            'label': class_name,
             'position_map': {
                 'x': round(x_map, 2),
                 'y': round(y_map, 2),
                 'z': round(z_map, 2),
             },
-            'frame_id': self._map_frame,
-            'timestamp': timestamp,
+            'confidence': round(conf, 4),
         }
 
     def _save_map_json(self) -> None:
