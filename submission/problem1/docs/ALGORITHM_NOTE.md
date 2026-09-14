@@ -1,59 +1,14 @@
 # Algorithm Note
 
-The central server evaluates every new request against every drone and writes a decision audit before any binding assignment.
+Score every drone for each request, pick the cheapest feasible one. Every decision is logged.
 
-## Feasibility Gate
-
-For request `r = (destination, payload, deadline)`, a drone is eligible only when:
-
-- payload is at or below `2.5 kg`;
-- drone is in `Idle`, `Returning`, or `Holding`;
-- current SoC is not below the critical threshold;
-- loaded outbound energy plus empty return energy plus emergency reserve fits inside degraded usable capacity;
-- expected delivery arrival is before the deadline;
-- a charging pad can be reserved or queued without violating the safety reserve.
-
-Energy uses the degraded battery capacity:
+Eligible only if: payload ≤ 2.5 kg, status is Idle/Returning/Holding, SoC ≥ 15%,
+`outbound + return + 12% reserve` fits in degraded capacity, arrival is before deadline.
 
 ```text
-usable_capacity_wh = nominal_capacity_wh * soh_pct / 100
-available_energy_wh = usable_capacity_wh * soc_pct / 100
-required_wh = energy(base -> destination, payload) + energy(destination -> base, 0 kg) + reserve_wh
-```
-
-Speed decreases with payload:
-
-```text
+usable = 520Wh * health% / 100;  need = energy(base->dst, m) + energy(dst->base, 0) + reserve
 v(m) = 12.0 * (1 - 0.35 * m / 2.5)
+cost = deadline + energy + workload + pad_wait + low_battery
 ```
 
-## Cost Function
-
-Eligible drones are ranked by:
-
-```text
-cost =
-  deadline_cost +
-  energy_cost +
-  workload_penalty +
-  pad_wait_cost +
-  low_soc_cost
-```
-
-- `deadline_cost`: normalizes flight time by remaining deadline slack.
-- `energy_cost`: penalizes wasteful assignments.
-- `workload_penalty`: discourages repeatedly using the same batteries.
-- `pad_wait_cost`: accounts for return-to-charge congestion.
-- `low_soc_cost`: keeps low-battery drones available for recovery instead of routine work.
-
-## Explainability
-
-Each `DecisionAudit` stores:
-
-- selected drone or `None`;
-- every candidate drone;
-- eligibility flag;
-- ETA, energy, deadline margin, pad wait, workload penalty, total cost;
-- rejection or selection reason.
-
-The server exposes the latest audits on `GET /audit`.
+`GET /audit` returns the picked drone plus per-drone ETA/energy/margin/cost.

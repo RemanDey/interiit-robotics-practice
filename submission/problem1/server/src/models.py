@@ -1,13 +1,11 @@
-"""Shared models and constants for the drone fleet simulator."""
-
-from __future__ import annotations
+"""Shared models for the drone fleet. Keep this file dumb: constants + data + physics."""
 
 from dataclasses import dataclass, field
 from enum import Enum
-from math import hypot
+from math import dist
 from typing import Dict, List, Optional, Tuple
 
-
+# --- tuning knobs (see PROBLEM_STATEMENT.md) ---
 BASE_POSITION = (0.0, 0.0, 0.0)
 FLEET_SIZE = 10
 PAD_COUNT = 3
@@ -75,15 +73,15 @@ class Drone:
     route: List[Tuple[float, float, float]] = field(default_factory=list)
 
     @property
-    def soh_pct(self) -> float:
+    def soh_pct(self):
         return max(50.0, 100.0 * (1.0 - self.cycle_count * DEGRADATION_PER_FULL_CYCLE))
 
     @property
-    def usable_capacity_wh(self) -> float:
+    def usable_capacity_wh(self):
         return NOMINAL_BATTERY_WH * self.soh_pct / 100.0
 
     @property
-    def available_energy_wh(self) -> float:
+    def available_energy_wh(self):
         return self.usable_capacity_wh * self.soc_pct / 100.0
 
 
@@ -126,25 +124,24 @@ class FleetMetrics:
     cycle_variance: float
 
 
-def distance_m(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
-    return hypot(hypot(a[0] - b[0], a[1] - b[1]), a[2] - b[2])
+def distance_m(a, b):
+    return dist(a, b)
 
 
-def cruise_speed_mps(payload_kg: float, speed_factor: float = 1.0) -> float:
-    payload_ratio = min(max(payload_kg / MAX_PAYLOAD_KG, 0.0), 1.0)
-    return max(3.0, BASE_SPEED_MPS * (1.0 - PAYLOAD_SPEED_ALPHA * payload_ratio) * speed_factor)
+def cruise_speed_mps(payload_kg, speed_factor=1.0):
+    ratio = min(max(payload_kg / MAX_PAYLOAD_KG, 0.0), 1.0)
+    return max(3.0, BASE_SPEED_MPS * (1.0 - PAYLOAD_SPEED_ALPHA * ratio) * speed_factor)
 
 
-def energy_for_leg_wh(distance: float, payload_kg: float) -> float:
-    full_payload_power_wh_per_s = NOMINAL_BATTERY_WH / FULL_PAYLOAD_ENDURANCE_S
-    payload_factor = 0.52 + 0.48 * min(max(payload_kg / MAX_PAYLOAD_KG, 0.0), 1.0)
-    speed = cruise_speed_mps(payload_kg)
-    return (distance / speed) * full_payload_power_wh_per_s * payload_factor
+def energy_for_leg_wh(distance, payload_kg):
+    power = NOMINAL_BATTERY_WH / FULL_PAYLOAD_ENDURANCE_S
+    factor = 0.52 + 0.48 * min(max(payload_kg / MAX_PAYLOAD_KG, 0.0), 1.0)
+    return (distance / cruise_speed_mps(payload_kg)) * power * factor
 
 
 def build_default_fleet() -> Dict[str, Drone]:
-    return {f"DR-{index:02d}": Drone(drone_id=f"DR-{index:02d}") for index in range(1, FLEET_SIZE + 1)}
+    return {f"DR-{i:02d}": Drone(drone_id=f"DR-{i:02d}") for i in range(1, FLEET_SIZE + 1)}
 
 
 def build_default_pads() -> Dict[str, Pad]:
-    return {f"PAD-{index}": Pad(pad_id=f"PAD-{index}") for index in range(1, PAD_COUNT + 1)}
+    return {f"PAD-{i}": Pad(pad_id=f"PAD-{i}") for i in range(1, PAD_COUNT + 1)}
