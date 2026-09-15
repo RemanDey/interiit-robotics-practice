@@ -12,7 +12,7 @@ def get_process_memory_mb():
 mem_baseline = get_process_memory_mb()
 print(f"[RAM] Baseline Process RAM: {mem_baseline:.2f} MB")
 
-model = YOLO("yolov8n-seg.pt")
+model = YOLO("yolo11n-seg-ade20k.pt")
 
 
 mem_post_model = get_process_memory_mb()
