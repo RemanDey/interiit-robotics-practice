@@ -186,7 +186,7 @@ class Object3DMapperNode(Node):
         self.tracked_objects[track_id] = {
             'id': track_id,
             'label': class_name,
-            'position_map': {
+            'position': {
                 'x': round(x_map, 2),
                 'y': round(y_map, 2),
                 'z': round(z_map, 2),
