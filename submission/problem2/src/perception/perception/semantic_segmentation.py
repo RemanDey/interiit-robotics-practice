@@ -53,7 +53,7 @@ class Object3DMapperNode(Node):
         self.get_logger().info("3D Object Mapper Node Initialized.")
 
     def _load_parameters(self) -> None:
-        self.declare_parameter('model_name', 'yolo11s-seg.pt')
+        self.declare_parameter('model_name', 'yolov8-seg.pt')
         self.declare_parameter('rgb_topic', '/oakd/rgb/preview/image_raw')
         self.declare_parameter('depth_topic', '/oakd/rgb/preview/depth')
         self.declare_parameter('camera_info_topic', '/oakd/rgb/preview/camera_info')

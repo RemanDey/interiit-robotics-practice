@@ -1,9 +1,18 @@
+# from ultralytics import YOLOE
+
+# model = YOLOE("yoloe-26s-seg.pt")
+
+# # "double-decker bus" is not a COCO class; YOLOE resolves it from the words alone
+# model.set_classes(["double-decker bus", "person"])
+
+# results = model.predict("https://ultralytics.com/images/bus.jpg")
+# results[0].show()
 import sys
 import os
 import cv2
 import numpy as np
 import psutil
-from ultralytics import YOLO
+from ultralytics import YOLOE
 
 def get_process_memory_mb():
     process = psutil.Process(os.getpid())
@@ -12,7 +21,7 @@ def get_process_memory_mb():
 mem_baseline = get_process_memory_mb()
 print(f"[RAM] Baseline Process RAM: {mem_baseline:.2f} MB")
 
-model = YOLO("yolov8s-world.pt")
+model = YOLOE("yoloe-26n-seg.pt")
 
 model.set_classes(["sofa", "chair", "bottle", "dustbin", "trash can", "indoor lamp","person", "tv", "laptop", "keyboard", "mouse", "cell phone", "book", "cup", "plate", "fork", "spoon", "knife"])
 mem_post_model = get_process_memory_mb()

@@ -1,134 +1,22 @@
 {
-  "1": {
-    "id": 1,
-    "class": "dining table",
-    "confidence": 0.2772,
-    "position_map": {
-      "x": 0.95,
-      "y": -0.05,
-      "z": 0.01
-    },
-    "frame_id": "map",
-    "timestamp": 38.775
-  },
   "9": {
     "id": 9,
-    "class": "person",
-    "confidence": 0.78,
+    "label": "chair",
     "position_map": {
-      "x": 0.86,
-      "y": -0.88,
-      "z": 0.33
+      "x": -5.26,
+      "y": -8.91,
+      "z": 0.45
     },
-    "frame_id": "map",
-    "timestamp": 41.547
+    "confidence": 0.2525
   },
-  "26": {
-    "id": 26,
-    "class": "bed",
-    "confidence": 0.2678,
+  "10": {
+    "id": 10,
+    "label": "chair",
     "position_map": {
-      "x": 0.71,
-      "y": -1.47,
-      "z": 0.01
+      "x": -4.85,
+      "y": -8.14,
+      "z": 0.38
     },
-    "frame_id": "map",
-    "timestamp": 46.629
-  },
-  "32": {
-    "id": 32,
-    "class": "person",
-    "confidence": 0.3771,
-    "position_map": {
-      "x": 0.96,
-      "y": -1.0,
-      "z": 0.24
-    },
-    "frame_id": "map",
-    "timestamp": 49.137
-  },
-  "33": {
-    "id": 33,
-    "class": "surfboard",
-    "confidence": 0.2762,
-    "position_map": {
-      "x": 0.85,
-      "y": -0.89,
-      "z": 0.05
-    },
-    "frame_id": "map",
-    "timestamp": 50.193
-  },
-  "35": {
-    "id": 35,
-    "class": "bird",
-    "confidence": 0.3285,
-    "position_map": {
-      "x": 0.47,
-      "y": -0.5,
-      "z": 0.03
-    },
-    "frame_id": "map",
-    "timestamp": 51.414
-  },
-  "47": {
-    "id": 47,
-    "class": "person",
-    "confidence": 0.3217,
-    "position_map": {
-      "x": 1.22,
-      "y": -1.7,
-      "z": 0.32
-    },
-    "frame_id": "map",
-    "timestamp": 83.457
-  },
-  "62": {
-    "id": 62,
-    "class": "person",
-    "confidence": 0.2847,
-    "position_map": {
-      "x": 1.48,
-      "y": -1.69,
-      "z": 0.08
-    },
-    "frame_id": "map",
-    "timestamp": 85.899
-  },
-  "63": {
-    "id": 63,
-    "class": "surfboard",
-    "confidence": 0.2922,
-    "position_map": {
-      "x": 0.98,
-      "y": -0.96,
-      "z": 0.19
-    },
-    "frame_id": "map",
-    "timestamp": 85.899
-  },
-  "65": {
-    "id": 65,
-    "class": "surfboard",
-    "confidence": 0.2656,
-    "position_map": {
-      "x": 1.0,
-      "y": -0.94,
-      "z": 0.19
-    },
-    "frame_id": "map",
-    "timestamp": 85.668
-  },
-  "71": {
-    "id": 71,
-    "class": "person",
-    "confidence": 0.4066,
-    "position_map": {
-      "x": 1.5,
-      "y": -1.52,
-      "z": 0.06
-    },
-    "frame_id": "map",
-    "timestamp": 90.552
+    "confidence": 0.6759
   }
 }
