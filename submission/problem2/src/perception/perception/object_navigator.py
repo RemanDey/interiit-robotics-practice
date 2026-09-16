@@ -31,7 +31,6 @@ class ObjectNavigator(Node):
             10
         )
 
-        # Continuously publish markers
         self.marker_timer = self.create_timer(
             1.0,
             self.publish_object_labels
@@ -63,7 +62,7 @@ class ObjectNavigator(Node):
 
                 matches.append({
                     'id': object_id,
-                    'position': obj['position_map'],
+                    'position': obj['position'],
                     'confidence': obj.get('confidence', 0.0)
                 })
 
@@ -187,7 +186,7 @@ class ObjectNavigator(Node):
 
         for object_id, obj in data.items():
 
-            position = obj['position_map']
+            position = obj['position']
 
             marker = Marker()
 

@@ -209,9 +209,7 @@ class Object3DMapperNode(Node):
             return
         rgb_image, depth_image = conversion
 
-        results = self.model.track(
-            rgb_image, persist=True, tracker='bytetrack.yaml', verbose=False
-        )[0]
+        results = self.model.track(rgb_image, persist=True, tracker='bytetrack.yaml', verbose=False)[0]
 
         debug_frame = results.plot() if results is not None else rgb_image.copy()
 
