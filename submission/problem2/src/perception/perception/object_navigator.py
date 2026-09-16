@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import threading
 
 import rclpy
 from rclpy.node import Node
@@ -8,6 +9,7 @@ from rclpy.action import ActionClient
 
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
+from visualization_msgs.msg import Marker
 
 
 class ObjectNavigator(Node):
@@ -21,6 +23,18 @@ class ObjectNavigator(Node):
             self,
             NavigateToPose,
             'navigate_to_pose'
+        )
+
+        self.marker_pub = self.create_publisher(
+            Marker,
+            '/object_labels',
+            10
+        )
+
+        # Continuously publish markers
+        self.marker_timer = self.create_timer(
+            1.0,
+            self.publish_object_labels
         )
 
     def find_object(self, label):
@@ -59,7 +73,7 @@ class ObjectNavigator(Node):
             )
             return None
 
-        # Select highest-confidence detection
+        # Highest-confidence detection
         best = max(
             matches,
             key=lambda obj: obj['confidence']
@@ -108,7 +122,6 @@ class ObjectNavigator(Node):
         goal.pose.pose.position.y = y
         goal.pose.pose.position.z = 0.0
 
-        # yaw = 0
         goal.pose.pose.orientation.x = 0.0
         goal.pose.pose.orientation.y = 0.0
         goal.pose.pose.orientation.z = 0.0
@@ -160,14 +173,65 @@ class ObjectNavigator(Node):
                 f'{result.status}'
             )
 
+    def publish_object_labels(self):
 
-def main(args=None):
+        try:
+            with open(self.json_file, 'r') as f:
+                data = json.load(f)
 
-    rclpy.init(args=args)
+        except Exception as e:
+            self.get_logger().error(
+                f'Could not read JSON: {e}'
+            )
+            return
 
-    node = ObjectNavigator()
+        for object_id, obj in data.items():
 
-    # Simple Python input
+            position = obj['position_map']
+
+            marker = Marker()
+
+            marker.header.frame_id = 'map'
+            marker.header.stamp = (
+                self.get_clock().now().to_msg()
+            )
+
+            marker.ns = 'objects'
+            marker.id = int(object_id)
+
+            marker.type = Marker.TEXT_VIEW_FACING
+            marker.action = Marker.ADD
+
+            marker.pose.position.x = position['x']
+            marker.pose.position.y = position['y']
+
+            # Slightly above the 2D map plane
+            marker.pose.position.z = 0.2
+
+            marker.pose.orientation.x = 0.0
+            marker.pose.orientation.y = 0.0
+            marker.pose.orientation.z = 0.0
+            marker.pose.orientation.w = 1.0
+
+            marker.scale.z = 0.55
+
+            marker.color.a = 1.0
+            marker.color.r = 0.0
+            marker.color.g = 1.0
+            marker.color.b = 0.0
+
+            confidence = obj.get('confidence', 0.0)
+
+            marker.text = (
+                f"{obj['label']} "
+                f"[{confidence:.2f}]"
+            )
+
+            self.marker_pub.publish(marker)
+
+
+def get_user_input(node):
+
     label = input(
         '\nEnter object to navigate to: '
     ).strip()
@@ -176,12 +240,31 @@ def main(args=None):
         node.get_logger().error(
             'No object entered.'
         )
+        return
 
-    else:
-        node.navigate_to_object(label)
+    node.navigate_to_object(label)
 
-        # Keep ROS alive while Nav2 executes
+
+def main(args=None):
+
+    rclpy.init(args=args)
+
+    node = ObjectNavigator()
+
+    # Run input() separately so ROS callbacks continue running
+    input_thread = threading.Thread(
+        target=get_user_input,
+        args=(node,),
+        daemon=True
+    )
+
+    input_thread.start()
+
+    try:
         rclpy.spin(node)
+
+    except KeyboardInterrupt:
+        pass
 
     node.destroy_node()
     rclpy.shutdown()
