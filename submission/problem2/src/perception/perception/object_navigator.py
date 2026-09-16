@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import json
-import sys
 
 import rclpy
 from rclpy.node import Node
@@ -16,14 +15,7 @@ class ObjectNavigator(Node):
     def __init__(self):
         super().__init__('object_navigator')
 
-        self.declare_parameter(
-            'json_file',
-            '/home/deimos/objects.json'
-        )
-
-        self.json_file = self.get_parameter(
-            'json_file'
-        ).get_parameter_value().string_value
+        self.json_file = 'map.json'
 
         self.nav_client = ActionClient(
             self,
@@ -31,14 +23,11 @@ class ObjectNavigator(Node):
             'navigate_to_pose'
         )
 
-        self.get_logger().info(
-            f'Using object database: {self.json_file}'
-        )
+    def find_object(self, label):
 
-    def load_objects(self):
         try:
             with open(self.json_file, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
 
         except FileNotFoundError:
             self.get_logger().error(
@@ -52,12 +41,6 @@ class ObjectNavigator(Node):
             )
             return None
 
-    def find_object(self, label):
-        data = self.load_objects()
-
-        if data is None:
-            return None
-
         matches = []
 
         for object_id, obj in data.items():
@@ -66,33 +49,31 @@ class ObjectNavigator(Node):
 
                 matches.append({
                     'id': object_id,
-                    'label': obj['label'],
                     'position': obj['position_map'],
                     'confidence': obj.get('confidence', 0.0)
                 })
 
         if not matches:
             self.get_logger().error(
-                f'No object found with label "{label}"'
+                f'No "{label}" found in JSON.'
             )
             return None
 
-        # Select the highest-confidence detection
+        # Select highest-confidence detection
         best = max(
             matches,
             key=lambda obj: obj['confidence']
         )
 
         self.get_logger().info(
-            f'Found {label}: '
-            f'id={best["id"]}, '
-            f'confidence={best["confidence"]:.3f}, '
-            f'position={best["position"]}'
+            f'Found {label} '
+            f'(ID: {best["id"]}, '
+            f'confidence: {best["confidence"]:.3f})'
         )
 
         return best
 
-    def send_goal(self, label):
+    def navigate_to_object(self, label):
 
         obj = self.find_object(label)
 
@@ -101,9 +82,7 @@ class ObjectNavigator(Node):
 
         x = obj['position']['x']
         y = obj['position']['y']
-        z = obj['position'].get('z', 0.0)
 
-        # Wait for Nav2
         self.get_logger().info(
             'Waiting for Nav2...'
         )
@@ -112,43 +91,37 @@ class ObjectNavigator(Node):
                 timeout_sec=10.0):
 
             self.get_logger().error(
-                'Nav2 action server not available!'
+                'Nav2 is not available.'
             )
             return
 
-        # Create Nav2 goal
-        goal_msg = NavigateToPose.Goal()
+        goal = NavigateToPose.Goal()
 
-        goal_msg.pose = PoseStamped()
+        goal.pose = PoseStamped()
 
-        goal_msg.pose.header.frame_id = 'map'
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.header.frame_id = 'map'
+        goal.pose.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
 
-        goal_msg.pose.pose.position.x = x
-        goal_msg.pose.pose.position.y = y
+        goal.pose.pose.position.x = x
+        goal.pose.pose.position.y = y
+        goal.pose.pose.position.z = 0.0
 
-        # Nav2 operates in 2D, so orientation is initially
-        # set to zero yaw.
-        goal_msg.pose.pose.position.z = 0.0
-
-        goal_msg.pose.pose.orientation.x = 0.0
-        goal_msg.pose.pose.orientation.y = 0.0
-        goal_msg.pose.pose.orientation.z = 0.0
-        goal_msg.pose.pose.orientation.w = 1.0
+        # yaw = 0
+        goal.pose.pose.orientation.x = 0.0
+        goal.pose.pose.orientation.y = 0.0
+        goal.pose.pose.orientation.z = 0.0
+        goal.pose.pose.orientation.w = 1.0
 
         self.get_logger().info(
-            f'Sending Nav2 goal for "{label}"'
+            f'Navigating to {label}: '
+            f'x={x:.2f}, y={y:.2f}'
         )
 
-        self.get_logger().info(
-            f'Goal: x={x:.2f}, y={y:.2f}'
-        )
+        future = self.nav_client.send_goal_async(goal)
 
-        send_future = self.nav_client.send_goal_async(
-            goal_msg
-        )
-
-        send_future.add_done_callback(
+        future.add_done_callback(
             self.goal_response_callback
         )
 
@@ -157,13 +130,14 @@ class ObjectNavigator(Node):
         goal_handle = future.result()
 
         if not goal_handle.accepted:
+
             self.get_logger().error(
                 'Nav2 rejected the goal.'
             )
             return
 
         self.get_logger().info(
-            'Nav2 goal accepted.'
+            'Goal accepted by Nav2.'
         )
 
         result_future = goal_handle.get_result_async()
@@ -176,15 +150,14 @@ class ObjectNavigator(Node):
 
         result = future.result()
 
-        status = result.status
-
-        if status == 4:
+        if result.status == 4:
             self.get_logger().info(
-                'Robot reached the object!'
+                'Successfully reached the object!'
             )
         else:
             self.get_logger().warn(
-                f'Navigation finished with status: {status}'
+                f'Navigation ended with status '
+                f'{result.status}'
             )
 
 
@@ -194,22 +167,21 @@ def main(args=None):
 
     node = ObjectNavigator()
 
-    # Get object label from command line
-    if len(sys.argv) < 2:
+    # Simple Python input
+    label = input(
+        '\nEnter object to navigate to: '
+    ).strip()
 
+    if not label:
         node.get_logger().error(
-            'Usage: ros2 run <package> object_navigator chair'
+            'No object entered.'
         )
 
-        node.destroy_node()
-        rclpy.shutdown()
-        return
+    else:
+        node.navigate_to_object(label)
 
-    label = sys.argv[1]
-
-    node.send_goal(label)
-
-    rclpy.spin(node)
+        # Keep ROS alive while Nav2 executes
+        rclpy.spin(node)
 
     node.destroy_node()
     rclpy.shutdown()
