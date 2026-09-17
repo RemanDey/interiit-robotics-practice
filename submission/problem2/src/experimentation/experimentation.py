@@ -12,9 +12,8 @@ def get_process_memory_mb():
 mem_baseline = get_process_memory_mb()
 print(f"[RAM] Baseline Process RAM: {mem_baseline:.2f} MB")
 
-model = YOLO("yolov8s-world.pt")
+model = YOLO("adeyolo11s-seg.pt")
 
-model.set_classes(["sofa", "chair", "bottle", "dustbin", "trash can", "indoor lamp","person", "tv", "laptop", "keyboard", "mouse", "cell phone", "book", "cup", "plate", "fork", "spoon", "knife"])
 mem_post_model = get_process_memory_mb()
 print(f"[RAM] RAM after loading model: {mem_post_model:.2f} MB (Model overhead: {mem_post_model - mem_baseline:.2f} MB)")
 

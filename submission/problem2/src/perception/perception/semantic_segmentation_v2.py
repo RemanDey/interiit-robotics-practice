@@ -26,7 +26,7 @@ class Object3DMapperNode(Node):
     def __init__(self):
         super().__init__('object_3d_mapper_node')
         self.model_name = self.declare_parameter(
-            'model_name', 'yolov8n-seg.pt'
+            'model_name', 'my-weights-yolo11s-seg.pt'
         ).value
 
         self.rgb_topic = self.declare_parameter(
@@ -52,19 +52,12 @@ class Object3DMapperNode(Node):
         self.debug_topic = self.declare_parameter(
             'debug_image_topic', '/perception/debug_image'
         ).value
-
-
         self.bridge = CvBridge()
         self.model = YOLO(self.model_name)
-
         self.camera = PinholeCameraModel()
         self.camera_ready = False
-
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(
-            self.tf_buffer, self
-        )
-
+        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.objects = {}
 
         self.create_subscription(
@@ -169,18 +162,14 @@ class Object3DMapperNode(Node):
             depth_m = float(np.median(valid))
             if depth.dtype == np.uint16:
                 depth_m /= 1000.0
-
             if depth_m <= 0.1 or depth_m > 10.0:
                 continue
             ray = self.camera.projectPixelTo3dRay(
                 (u, v)
             )
-
             x = ray[0] * depth_m
             y = ray[1] * depth_m
             z = ray[2] * depth_m
-
-
             point = PointStamped()
             point.header = rgb_msg.header
             point.point.x = x

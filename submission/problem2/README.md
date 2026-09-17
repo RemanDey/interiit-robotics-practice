@@ -2,178 +2,123 @@
 
 ## Overview
 
-This repository implements a complete semantic mapping pipeline for indoor environments using a TurtleBot 4 with OAK-D RGB-D camera in Gazebo simulation. The system performs real-time instance segmentation, 3D localization, and persistent semantic mapping with Kalman filter-based spatial deduplication.
+ROS 2 (Humble) semantic-mapping pipeline for a TurtleBot 4 with OAK-D RGB-D camera in Ignition Gazebo. A perception node runs YOLO instance segmentation with persistent tracking (ByteTrack), lifts each mask centroid to 3D with aligned depth + camera intrinsics, transforms it into the `map` frame via TF2, and maintains a persistent `map.json` keyed by track ID. A companion navigator node reads `map.json`, sends the best-confidence match to Nav2, and publishes RViz label markers.
 
 ## Architecture
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌────────────────┐
-│  RGB-D      │────▶│  YOLOv8n-   │────▶│  Mask +     │────▶│  TF2 Transform │
-│  Camera     │     │  seg        │     │  Depth      │     │  to World      │
-└─────────────┘     └─────────────┘     └─────────────┘     └────────────────┘
-                                                              │
-                                                              ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌──────────────┐
-│  Semantic   │◀────│  Kalman     │◀────│  Floor      │◀────│  Min-Z       │
-│  Map JSON   │     │  Trackers   │     │  Projection │     │  Projection  │
-└─────────────┘     └─────────────┘     └─────────────┘     └──────────────┘
+RGB + Depth (time-synced) → YOLO-seg track (ByteTrack, persist=True)
+  → mask centroid (moments) → median depth in 5×5 window
+  → PinholeCameraModel.projectPixelTo3dRay → TF2 → map frame
+  → tracked_objects dict → /perception_map (String JSON)
+                         → /perception/debug_image (Image)
+                         → map.json (cwd of node)
 ```
 
-## Key Features
+Dedup/tracking is done by the Ultralytics tracker (`bytetrack.yaml`, `persist=True`), not by a custom Kalman filter. There is no min-Z floor projection — the stored point is the centroid ray at median depth, transformed to `map`.
 
-- **Pixel-level segmentation**: YOLOv8n-seg with dynamic masks (not bounding boxes)
-- **3D Floor Coordinates**: Min-Z point in mask projected to floor plane (z=0)
-- **World Frame Mapping**: TF2 transformation from camera optical frame → map frame
-- **Spatial Deduplication**: Kalman filter (constant velocity) for persistent object tracking
-- **Benchmarking**: Per-stage latency, FPS, and peak RAM monitoring
-- **Output Format**: Compliant JSON schema as specified
+## Packages / Files
+
+| Path | What it is |
+|------|------------|
+| `src/perception/perception/semantic_segmentation.py` | Active node `Object3DMapperNode`, entry point `perception_segmentor` |
+| `src/perception/perception/semantic_segmentation_v2.py` | Flattened variant of the same node (not registered in `setup.py`) |
+| `src/perception/perception/object_navigator.py` | `ObjectNavigator`: `map.json` lookup → Nav2 `NavigateToPose` + `TEXT_VIEW_FACING` markers on `/object_labels` @ 1 Hz (not registered in `setup.py`, run directly) |
+| `src/perception/perception/test_markers.py` | Minimal SPHERE marker publisher on `/object_labels` for RViz testing |
+| `src/perception/perception/map.json` | Latest mapping run output (dict keyed by track ID) |
+| `map.json` (repo root) | Older/smaller mapping run output, same schema |
+| `frames_2026-09-16_21.55.56.gv` / `.pdf` | `view_frames` TF-tree dump (2026-09-16): `map → odom → base_link → … → oakd_*_optical_frame` |
+| `yolov8n-seg.pt`, `yolo11s-seg.pt` (root) + `src/perception/perception/{yolov8n,yolo11n,yolo11s}-seg.pt` | YOLO-seg weights (root copies duplicate the in-package ones) |
+| `result-2026-KD-0-20260902.json` | Host environment inventory (distro + `apt` package list), **not** a mapping result despite the name |
+| `src/experimentation/` | Offline prototyping: webcam/image YOLO-seg tests, YOLO-World/YOLOE scripts, custom ADE20K training (`my_training/`), local weights |
+| `src/turtlebot4_simulator/` | Upstream TurtleBot 4 Ignition Gazebo sim (worlds in `turtlebot4_ignition_bringup/worlds/`: `depot`, `maze`, `warehouse`, `my_world`) |
+| `src/turtlebot4/` | Upstream TurtleBot 4 drivers/msgs/description/navigation |
+| `src/m-explore-ros2/` | Third-party `m-explore` ROS 2 port (autonomous exploration / map merge) |
+| `build/` `install/` `log/` | Local `colcon` artifacts — do not commit |
 
 ## Output Format
 
+Actual schema is a dict keyed by track ID with `position` as an `{x, y, z}` object (not a list):
+
 ```json
-[
-  {
-    "id": 1,
-    "label": "sofa",
-    "position": [1.2, 3.4, 0.0],
-    "confidence": 0.89
+{
+  "20": {
+    "id": 20,
+    "label": "bench",
+    "position": { "x": -4.27, "y": -1.69, "z": 0.52 },
+    "confidence": 0.5561
   }
-]
+}
 ```
+
+The node rewrites `map.json` (relative to the node's working directory) on every callback while any object is tracked, and also publishes the same dict as a JSON string on `/perception_map`.
 
 ## Requirements
 
-- ROS 2 Humble
-- Ubuntu 22.04
-- Python 3.10+
-- NVIDIA GPU (for TensorRT optimization, optional)
-
-### Python Dependencies
-```bash
-pip install numpy scipy ultralytics opencv-python psutil
-```
-
-### ROS 2 Dependencies
-```bash
-sudo apt install ros-humble-tf2-ros ros-humble-tf2-geometry-msgs \
-    ros-humble-message-filters ros-humble-cv-bridge
-```
+- ROS 2 Humble, Ubuntu 22.04, Python 3.10+
+- ROS deps: `tf2_ros`, `tf2_geometry_msgs`, `message_filters`, `cv_bridge`, `image_geometry`, `sensor_msgs`, `visualization_msgs`, `nav2_msgs` (navigator only)
+- Python deps: `numpy`, `ultralytics`, `opencv-python` (`pip install numpy ultralytics opencv-python`)
 
 ## Building
 
 ```bash
-cd /path/to/workspace
-colcon build --packages-select object_mapping perception
+cd /path/to/workspace   # this folder
+colcon build --packages-select perception
 source install/setup.bash
 ```
 
+Only `perception_segmentor` is exposed as a console script. `semantic_segmentation_v2`, `object_navigator`, and `test_markers` have `main()` but no entry point — run them with `ros2 run perception <module>` after adding entry points, or directly with `python3 <file>` inside a sourced environment.
+
 ## Running
 
-### 1. Start Gazebo Simulation (small_house world)
 ```bash
+# 1. Sim + SLAM/Nav2 (provides map -> odom and oakd topics)
 ros2 launch turtlebot4_ignition_bringup turtlebot4_ignition.launch.py slam:=true nav2:=true rviz:=true model:=lite
+
+# 2. Perception node (active implementation)
+ros2 run perception perception_segmentor --ros-args \
+  -p model_name:=yolov8n-seg.pt \
+  -p rgb_topic:=/oakd/rgb/preview/image_raw \
+  -p depth_topic:=/oakd/rgb/preview/depth \
+  -p camera_info_topic:=/oakd/rgb/preview/camera_info \
+  -p map_frame:=map
+
+# 3. Monitor output
+ros2 topic echo /perception_map
+ros2 topic echo /perception/debug_image   # or view in RViz
+cat map.json                              # written to the node's cwd
+
+# 4. Navigate to a mapped object (reads ./map.json, prompts for label)
+python3 src/perception/perception/object_navigator.py
 ```
 
-### 2. Launch Semantic Mapping
-```bash
-ros2 launch object_mapping semantic_mapping.launch.py
-```
+## Configuration Parameters (`semantic_segmentation.py`)
 
-### 3. Monitor Output
-```bash
-# View semantic map (updated in real-time)
-watch -n 1 cat semantic_map.json
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `model_name` | `yolov8-seg.pt` | N.B. differs from `_v2` default (`yolov8n-seg.pt`); resolved relative to node cwd unless absolute |
+| `rgb_topic` | `/oakd/rgb/preview/image_raw` | Synced via `ApproximateTimeSynchronizer` (queue 10, slop 0.1) |
+| `depth_topic` | `/oakd/rgb/preview/depth` | `passthrough`; uint16 assumed mm, rejected outside 0.1–10.0 m |
+| `camera_info_topic` | `/oakd/rgb/preview/camera_info` | Latched once via `PinholeCameraModel` |
+| `map_frame` | `map` | TF lookup timeout 0.1 s; failures warn/skip |
+| `json_output_topic` | `/perception_map` | `std_msgs/String` with the full dict |
+| `debug_image_topic` | `/perception/debug_image` | `results.plot()` + centroid dot + `ID + Map:(x,y,z)` text |
 
-# View ROS topic
-ros2 topic echo /perception
-```
+Depth sampling: median of valid (>0) pixels in a 5×5 window around the mask centroid; masks resized with `INTER_NEAREST` when needed.
 
-### 4. Optional: Run Standalone Perception Node
-```bash
-ros2 run perception perception_segmentor
-```
-
-## Configuration Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `model_name` | `yolov8n-seg.pt` | YOLO model file |
-| `image_topic` | `/oakd/rgb/preview/image_raw` | RGB image topic |
-| `depth_topic` | `/oakd/rgb/preview/depth` | Aligned depth topic |
-| `camera_info_topic` | `/oakd/rgb/preview/camera_info` | Camera intrinsics |
-| `json_output_path` | `semantic_map.json` | Output JSON file |
-| `target_frame` | `map` | TF target frame (map/odom) |
-| `dedup_threshold` | `0.5` | Deduplication distance (m) |
-| `max_missed` | `30` | Frames before removing tracker |
-| `benchmark_enabled` | `true` | Enable performance logging |
-
-## TF Frame Chain
+## TF Frame Chain (from `frames_*.gv`)
 
 ```
-map → odom → base_link → oakd_rgb_camera_frame → oakd_rgb_camera_optical_frame
+map → odom → base_link → {oakd_camera_bracket, rplidar_link, wheels, …}
+oakd_camera_bracket → oakd_link → oakd_rgb_camera_frame → oakd_rgb_camera_optical_frame
 ```
 
-The node transforms from `oakd_rgb_camera_optical_frame` (Z-forward, X-right, Y-down) to the specified `target_frame`.
+## Known Gaps vs PROBLEM_STATEMENT
 
-## Benchmarking
-
-The node logs per-stage latency every 100 frames:
-- `inference`: YOLOv8 forward pass
-- `projection`: Mask depth sampling + 3D deprojection
-- `tf_lookup`: TF2 buffer lookup
-- `deduplication`: Kalman filter predict/update
-- `total`: End-to-end pipeline
-
-Also tracks peak RAM usage via `psutil`.
-
-## TensorRT Optimization (Optional)
-
-For deployment on Jetson Nano / edge devices:
-
-```bash
-# Export to ONNX
-yolo export model=yolov8n-seg.pt format=onnx opset=12
-
-# Convert to TensorRT FP16
-trtexec --onnx=yolov8n-seg.onnx --saveEngine=yolov8n-seg_fp16.engine --fp16
-
-# For INT8 (requires calibration dataset)
-trtexec --onnx=yolov8n-seg.onnx --saveEngine=yolov8n-seg_int8.engine --int8 --calib=calibration.cache
-```
-
-Then modify inference to use TensorRT Python API or ONNX Runtime with TensorRT EP.
-
-## Performance Targets
-
-| Metric | Target | Notes |
-|--------|--------|-------|
-| FPS | ≥ 10-15 | On Jetson Nano / RPi |
-| Peak RAM | < 8 GB | Including model weights |
-| Coordinate Drift | < 0.2m | After multiple loops |
-
-## File Structure
-
-```
-src/
-├── object_mapping/
-│   ├── object_mapping/
-│   │   ├── __init__.py
-│   │   └── object_mapping_node.py    # Main mapping node
-│   ├── launch/
-│   │   └── semantic_mapping.launch.py
-│   ├── setup.py
-│   └── package.xml
-├── perception/
-│   ├── perception/
-│   │   ├── __init__.py
-│   │   └── semantic_segmentation.py  # Standalone seg node
-│   ├── setup.py
-│   └── package.xml
-├── semantic_mapping_python/
-│   ├── main.py                        # Unified entry point
-│   └── experimentation.py             # Dev/testing script
-└── turtlebot4_simulator/              # Gazebo simulation
-```
+- No launch file, no `object_mapping` package, no per-stage latency/RAM logging, no TensorRT/ONNX path in the ROS code (RAM timing only exists in `src/experimentation/experimentation.py`).
+- No custom Kalman filter or Euclidean dedup node — identity persistence comes from ByteTrack IDs.
+- Stored `z` is the transformed centroid height, not a floor-projected meeting point.
+- Labels/IDs in `map.json` are raw YOLO-seg + ByteTrack output (note mislabels in sample runs, e.g. `airplane`, `traffic light` indoors); no confidence filtering or label allowlist.
 
 ## License
 
