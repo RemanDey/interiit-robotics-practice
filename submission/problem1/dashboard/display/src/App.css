@@ -1,0 +1,398 @@
+/* MATLAB-desktop inspired theme:
+   light-gray desktop, white figure panels, MATLAB blue (#0076CB) accents,
+   square corners, Consolas numerics like the Command Window / Workspace. */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  overflow: hidden;
+  font-family: "Segoe UI", -apple-system, Arial, Tahoma, sans-serif;
+  background: #d9d9d9;
+  color: #1a1a1a;
+}
+
+.dashboard {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  background: #d9d9d9;
+}
+
+/* ---------- Left panel: Workspace / Current Folder ---------- */
+.sidebar {
+  background: #f2f2f2;
+  border-right: 1px solid #a6a6a6;
+  padding: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1000;
+  overflow-y: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #0076cb;
+  color: #fff;
+  padding: 10px 14px;
+  border-bottom: 1px solid #005a9e;
+}
+
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 2px;
+  background: #fff;
+  /* MATLAB "L" membrane logo hint */
+  background-image: linear-gradient(135deg, #fff 55%, #0076cb 55%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: none;
+}
+
+.brand h1 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.brand p {
+  color: #d6e9f8;
+  font-size: 11px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.status-card {
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border-radius: 2px;
+  background: #fff;
+  border: 1px solid #ababab;
+}
+
+.status-card span {
+  color: #595959;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-card strong {
+  display: block;
+  font-size: 30px;
+  margin-top: 2px;
+  font-family: Consolas, "Courier New", monospace;
+  font-weight: 700;
+  color: #000;
+}
+
+.status-card p {
+  color: #595959;
+  font-size: 12px;
+}
+
+.status-card.critical {
+  border: 1px solid #a2142f;
+  border-left: 4px solid #a2142f;
+  background: #fff;
+}
+
+.status-card.critical strong {
+  color: #a2142f;
+}
+
+.fleet-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 12px;
+  border: 1px solid #ababab;
+  background: #fff;
+  padding: 6px;
+}
+
+.fleet-groups button {
+  background: #fff;
+  color: #1a1a1a;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  padding: 7px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: none;
+  font-size: 13px;
+}
+
+.fleet-groups button:hover {
+  background: #e5f1fb;
+  border-color: #0076cb;
+  transform: none;
+}
+
+.fleet-groups button.active {
+  background: #0076cb;
+  border-color: #005a9e;
+  color: #fff;
+  transform: none;
+}
+
+.fleet-groups button.active span {
+  color: #fff;
+}
+
+.fleet-groups span {
+  color: #404040;
+}
+
+.fleet-groups strong {
+  font-size: 14px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.selected-panel {
+  margin: auto 12px 0;
+  padding: 10px 12px;
+  border-radius: 2px;
+  background: #fff;
+  border: 1px solid #ababab;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.selected-panel > p {
+  color: #0076cb;
+  font-size: 12px;
+}
+
+.selected-panel > p::before {
+  content: ">> ";
+}
+
+.selected-panel h2 {
+  margin: 4px 0 10px;
+  font-size: 17px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid #d9d9d9;
+  font-size: 12px;
+}
+
+.detail-row span,
+.destination span {
+  color: #595959;
+  font-size: 12px;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.destination {
+  margin-top: 8px;
+}
+
+.destination p {
+  margin-top: 4px;
+  color: #000;
+  line-height: 1.4;
+  font-size: 12px;
+}
+
+/* ---------- Right side: figure window ---------- */
+.main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px;
+  gap: 8px;
+}
+
+.topbar {
+  min-height: 62px;
+  background: #e7e6e6;
+  color: #1a1a1a;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: center;
+  padding: 8px 14px;
+  gap: 12px;
+  z-index: 900;
+  border: 1px solid #a6a6a6;
+}
+
+.topbar div {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid #c8c8c8;
+  padding-left: 12px;
+}
+
+.topbar div:first-child {
+  border-left: none;
+  padding-left: 0;
+}
+
+.topbar span {
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #595959;
+}
+
+.topbar strong {
+  font-size: 20px;
+  letter-spacing: 0;
+  font-family: Consolas, "Courier New", monospace;
+  font-weight: 700;
+}
+
+.metric-alert strong {
+  color: #a2142f;
+}
+
+.alert-banner {
+  position: static;
+  background: #fff;
+  color: #a2142f;
+  padding: 8px 10px;
+  border-radius: 2px;
+  font-weight: 400;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  border: 1px solid #a2142f;
+  border-left: 4px solid #a2142f;
+  box-shadow: none;
+}
+
+.alert-banner::before {
+  content: "Error: ";
+  font-weight: 700;
+}
+
+.api-error {
+  position: static;
+  background: #fff7cc;
+  color: #7f6000;
+  padding: 8px 10px;
+  border-radius: 2px;
+  font-weight: 400;
+  border: 1px solid #edb120;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+}
+
+.map-shell {
+  flex: 1;
+  position: relative;
+  background: #fff;
+  border: 1px solid #7f7f7f;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* MATLAB figure title bar */
+.figure-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0076cb;
+  color: #fff;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-bottom: 1px solid #005a9e;
+  font-family: Consolas, "Courier New", monospace;
+  user-select: none;
+}
+
+.figure-dot {
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.figure-tools {
+  margin-left: auto;
+  letter-spacing: 2px;
+  opacity: 0.9;
+}
+
+.map {
+  flex: 1;
+  height: 100%;
+  width: 100%;
+  background: #fff;
+}
+
+.loading {
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f2f2f2;
+  color: #0076cb;
+  font-size: 15px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.loading::before {
+  content: ">> ";
+}
+
+.leaflet-container {
+  font-family: Consolas, "Courier New", monospace;
+}
+
+/* MATLAB-style axes grid feel for tiles */
+.leaflet-tile-pane {
+  filter: grayscale(25%) contrast(1.02);
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #fff !important;
+  color: #000 !important;
+  border: 1px solid #7f7f7f !important;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.25) !important;
+  border-radius: 2px !important;
+}
+
+.leaflet-popup-content {
+  line-height: 1.5;
+  font-family: Consolas, "Courier New", monospace !important;
+  font-size: 12px;
+}
+
+.leaflet-tooltip {
+  background: #ffffe0 !important;
+  color: #000 !important;
+  border: 1px solid #7f7f7f !important;
+  border-radius: 2px !important;
+  padding: 6px 8px !important;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.2) !important;
+  font-family: Consolas, "Courier New", monospace !important;
+  font-size: 12px;
+}
+
+.leaflet-control-zoom a {
+  background: #f2f2f2 !important;
+  color: #000 !important;
+  border: 1px solid #a6a6a6 !important;
+  border-radius: 0 !important;
+}
+
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.9) !important;
+  font-family: Consolas, "Courier New", monospace !important;
+  font-size: 10px !important;
+}
