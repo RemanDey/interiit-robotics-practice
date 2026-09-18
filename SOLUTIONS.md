@@ -1,3 +1,9 @@
+## Demo Video
+
+[![Demo Video](https://img.youtube.com/vi/Mngrw9pWEhQ/hqdefault.jpg)](https://youtu.be/Mngrw9pWEhQ)
+
+https://youtu.be/Mngrw9pWEhQ
+
 # Solutions Overview
 
 This file summarizes the submissions in `submission/` (note: singular, not `submissions/`).
