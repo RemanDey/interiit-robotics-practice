@@ -126,7 +126,8 @@ class Object3DMapperNode(Node):
             rgb,
             persist=True,
             tracker='deepocsort.yaml',
-            verbose=False
+            verbose=False,
+            with_reid=True
         )[0]
 
         debug = result.plot()
