@@ -125,7 +125,7 @@ class Object3DMapperNode(Node):
         result = self.model.track(
             rgb,
             persist=True,
-            tracker='bytetrack.yaml',
+            tracker='deepocsort.yaml',
             verbose=False
         )[0]
 
