@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 
 import json
-import csv
-import os
-import socket
 import traceback
 import numpy as np
 import cv2
@@ -12,7 +9,6 @@ from rclpy.node import Node
 from rclpy.duration import Duration
 from sensor_msgs.msg import Image, CameraInfo
 from std_msgs.msg import String
-from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PointStamped
 from tf2_ros import Buffer, TransformListener
 from tf2_geometry_msgs import do_transform_point
@@ -53,10 +49,7 @@ class Object3DMapperNode(Node):
     def __init__(self):
         super().__init__('object_3d_mapper_node')
         self._bridge = CvBridge()
-        self._profiler = Profiler(window=100)
-        self._diag_seq = 0
-        self._csv_file = None
-        self._csv_writer = None
+        self._profiler = Profiler()  # attached in _init_profiling(); all bench logic lives there
         self._load_parameters()
         self._init_model()
         self._init_camera()
@@ -126,32 +119,17 @@ class Object3DMapperNode(Node):
         self.debug_pub = self.create_publisher(Image, self._debug_image_topic, 10)
 
     def _init_profiling(self) -> None:
-        self._diag_pub = self.create_publisher(
-            DiagnosticArray, self._diagnostics_topic, 10
+        # Everything (DiagnosticArray @ stats_hz + CSV + summary JSON) is owned
+        # by profiler.py. Launching this node is enough to get all outputs.
+        self._profiler.attach(
+            node=self,
+            enabled=self._profiling_enabled,
+            diagnostics_topic=self._diagnostics_topic,
+            csv_path=self._csv_path,
+            summary_path=self._summary_path,
+            stats_hz=self._stats_hz,
+            model_name=self._model_name,
         )
-        try:
-            self._hostname = socket.gethostname()
-        except Exception:
-            self._hostname = "unknown"
-        if self._profiling_enabled:
-            try:
-                self._csv_file = open(self._csv_path, 'w', newline='')
-                self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=[
-                    'frame', 'stamp_ros_sec', 'fps_instant',
-                    'convert_ms', 'infer_track_ms', 'mask_centroid_ms',
-                    'depth_sample_ms', 'project_ms', 'tf_lookup_ms',
-                    'map_update_ms', 'debug_plot_publish_ms', 'total_e2e_ms',
-                    'n_tracks', 'rss_mb',
-                ])
-                self._csv_writer.writeheader()
-            except Exception as e:
-                self.get_logger().warn(f"Profiling CSV disabled: {e}")
-                self._csv_file = None
-                self._csv_writer = None
-            period = 1.0 / self._stats_hz if self._stats_hz > 0 else 1.0
-            self._diag_timer = self.create_timer(period, self._publish_diagnostics)
-        else:
-            self._diag_timer = None
 
     def camera_info_callback(self, info_msg: CameraInfo) -> None:
         if not self.has_camera_info:
@@ -352,122 +330,18 @@ class Object3DMapperNode(Node):
             for k, v in stage.items():
                 prof.record(k, v)
             prof.record('total_e2e_ms', total_ms)
-            self._write_csv_row(rgb_msg, fps_instant, stage, total_ms, n_tracks)
-
-    def _write_csv_row(self, rgb_msg, fps_instant, stage, total_ms, n_tracks) -> None:
-        if self._csv_writer is None:
-            return
-        try:
-            stamp = rgb_msg.header.stamp.sec + rgb_msg.header.stamp.nanosec * 1e-9
-            self._csv_writer.writerow({
-                'frame': self._profiler.frame_count,
-                'stamp_ros_sec': f"{stamp:.6f}",
-                'fps_instant': f"{fps_instant:.2f}",
-                'convert_ms': f"{stage['convert_ms']:.3f}",
-                'infer_track_ms': f"{stage['infer_track_ms']:.3f}",
-                'mask_centroid_ms': f"{stage['mask_centroid_ms']:.3f}",
-                'depth_sample_ms': f"{stage['depth_sample_ms']:.3f}",
-                'project_ms': f"{stage['project_ms']:.3f}",
-                'tf_lookup_ms': f"{stage['tf_lookup_ms']:.3f}",
-                'map_update_ms': f"{stage['map_update_ms']:.3f}",
-                'debug_plot_publish_ms': f"{stage['debug_plot_publish_ms']:.3f}",
-                'total_e2e_ms': f"{total_ms:.3f}",
-                'n_tracks': n_tracks,
-                'rss_mb': f"{self._profiler.rss_mb:.1f}",
-            })
-        except Exception as e:
-            self.get_logger().warn(f"CSV write failed: {e}", throttle_duration_sec=5.0)
-
-    def _diagnostic_level(self, snap: dict) -> tuple[int, str]:
-        fps = snap.get('fps.avg', 0.0)
-        peak = snap.get('ram.peak_mb', 0.0)
-        if fps <= 0.0 and snap.get('frames.count', 0) < 5:
-            return DiagnosticStatus.STALE, "warming up"
-        if fps < 5.0 or peak >= 8192:
-            return DiagnosticStatus.ERROR, f"LOW_FPS_OR_OOM fps={fps} peak={peak}MB"
-        if fps < 10.0 or peak >= 6144:
-            return DiagnosticStatus.WARN, f"near budget fps={fps} peak={peak}MB"
-        return DiagnosticStatus.OK, f"OK fps={fps} infer_p95={snap.get('infer_track_ms.p95', 0)}ms"
+            stamp_ros = rgb_msg.header.stamp.sec + rgb_msg.header.stamp.nanosec * 1e-9
+            prof.write_csv_row(stamp_ros, fps_instant, stage, total_ms, n_tracks)
 
     def _publish_diagnostics(self) -> None:
-        if not self._profiling_enabled:
-            return
-        snap = self._profiler.snapshot()
-        level, message = self._diagnostic_level(snap)
-        status = DiagnosticStatus()
-        status.level = level
-        status.name = "perception: semantic_segmentation"
-        status.message = message
-        status.hardware_id = f"{self._hostname}:{os.path.basename(str(self._model_name))}"
-        ordered_keys = [
-            'frames.count', 'fps.avg', 'fps.instant',
-            'convert_ms.avg', 'infer_track_ms.avg', 'infer_track_ms.p95',
-            'mask_centroid_ms.avg', 'depth_sample_ms.avg', 'project_ms.avg',
-            'tf_lookup_ms.avg', 'map_update_ms.avg',
-            'debug_plot_publish_ms.avg', 'total_e2e_ms.avg', 'total_e2e_ms.p95',
-            'ram.rss_mb', 'ram.peak_mb', 'ram.model_load_mb', 'ram.delta_mb',
-            'gpu.peak_mb', 'tf.fail_count', 'depth.reject_count',
-        ]
-        flat_p95_alias = {
-            'convert_ms.avg': snap.get('convert_ms.avg', 0),
-            'mask_centroid_ms.avg': snap.get('mask_centroid_ms.avg', 0),
-            'depth_sample_ms.avg': snap.get('depth_sample_ms.avg', 0),
-            'project_ms.avg': snap.get('project_ms.avg', 0),
-            'tf_lookup_ms.avg': snap.get('tf_lookup_ms.avg', 0),
-            'map_update_ms.avg': snap.get('map_update_ms.avg', 0),
-            'debug_plot_publish_ms.avg': snap.get('debug_plot_publish_ms.avg', 0),
-        }
-        for key in ordered_keys:
-            if key in flat_p95_alias:
-                val = flat_p95_alias[key]
-            else:
-                val = snap.get(key, 0)
-            kv = KeyValue()
-            kv.key = key
-            kv.value = "" if val is None else str(val)
-            status.values.append(kv)
-        # Extra: current tracked object count (live, not windowed).
-        kv = KeyValue()
-        kv.key = "tracks.live_count"
-        kv.value = str(len(self.tracked_objects))
-        status.values.append(kv)
-        arr = DiagnosticArray()
-        arr.header.stamp = self.get_clock().now().to_msg()
-        arr.status = [status]
-        self._diag_pub.publish(arr)
-        self._diag_seq += 1
-        self.get_logger().info(
-            f"[bench] fps={snap['fps.avg']} total_p95={snap['total_e2e_ms.p95']}ms "
-            f"infer_p95={snap['infer_track_ms.p95']}ms rss={snap['ram.rss_mb']}MB "
-            f"peak={snap['ram.peak_mb']}MB tracks={len(self.tracked_objects)}",
-            throttle_duration_sec=5.0,
-        )
+        # Thin delegate: all DiagnosticArray logic lives in profiler.py.
+        self._profiler.publish_diagnostics(live_tracks=len(self.tracked_objects))
 
     def write_summary(self) -> dict:
-        snap = self._profiler.snapshot()
-        summary = {
-            "model": str(self._model_name),
-            "snapshot": snap,
-            "live_tracks": len(self.tracked_objects),
-            "edge_budget": {
-                "fps_target": 10.0,
-                "ram_limit_mb": 8192,
-                "fps_pass": snap.get('fps.avg', 0.0) >= 10.0,
-                "ram_pass": snap.get('ram.peak_mb', 0.0) < 8192,
-            },
-        }
-        if self._profiling_enabled:
-            try:
-                with open(self._summary_path, 'w') as f:
-                    json.dump(summary, f, indent=2)
-            except Exception:
-                pass
-            try:
-                if self._csv_file is not None:
-                    self._csv_file.flush()
-            except Exception:
-                pass
-        return summary
+        # Thin delegate: summary JSON logic lives in profiler.py.
+        return self._profiler.write_summary(
+            model=str(self._model_name), live_tracks=len(self.tracked_objects)
+        )
 
 
 def main(args=None) -> None:
@@ -479,12 +353,9 @@ def main(args=None) -> None:
         pass
     finally:
         try:
-            node.write_summary()
-        except Exception:
-            pass
-        try:
-            if node._csv_file is not None:
-                node._csv_file.close()
+            node._profiler.shutdown(
+                model=str(node._model_name), live_tracks=len(node.tracked_objects)
+            )
         except Exception:
             pass
         node.destroy_node()

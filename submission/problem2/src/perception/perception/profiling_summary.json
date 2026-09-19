@@ -1,0 +1,40 @@
+{
+  "model": "self-test",
+  "snapshot": {
+    "frames.count": 20,
+    "fps.avg": 64.48,
+    "fps.instant": 64.1,
+    "convert_ms.avg": 2.62,
+    "convert_ms.p95": 4.228,
+    "infer_track_ms.avg": 5.95,
+    "infer_track_ms.p95": 7.0,
+    "mask_centroid_ms.avg": 4.117,
+    "mask_centroid_ms.p95": 4.591,
+    "depth_sample_ms.avg": 0.4,
+    "depth_sample_ms.p95": 0.4,
+    "project_ms.avg": 0.1,
+    "project_ms.p95": 0.1,
+    "tf_lookup_ms.avg": 0.3,
+    "tf_lookup_ms.p95": 0.3,
+    "map_update_ms.avg": 0.2,
+    "map_update_ms.p95": 0.2,
+    "debug_plot_publish_ms.avg": 1.0,
+    "debug_plot_publish_ms.p95": 1.0,
+    "total_e2e_ms.avg": 8.5,
+    "total_e2e_ms.p95": 9.0,
+    "ram.rss_mb": 508.23,
+    "ram.peak_mb": 508.23,
+    "ram.model_load_mb": 0.07,
+    "ram.delta_mb": 492.13,
+    "gpu.peak_mb": 0.0,
+    "tf.fail_count": 0,
+    "depth.reject_count": 0
+  },
+  "live_tracks": 3,
+  "edge_budget": {
+    "fps_target": 10.0,
+    "ram_limit_mb": 8192,
+    "fps_pass": true,
+    "ram_pass": true
+  }
+}

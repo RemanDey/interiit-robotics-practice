@@ -1,0 +1,152 @@
+{
+  "1": {
+    "id": 1,
+    "label": "airplane",
+    "position": {
+      "x": -8.64,
+      "y": -4.02,
+      "z": 0.7
+    },
+    "confidence": 0.5123
+  },
+  "4": {
+    "id": 4,
+    "label": "traffic light",
+    "position": {
+      "x": -5.26,
+      "y": -9.02,
+      "z": 0.44
+    },
+    "confidence": 0.3826
+  },
+  "11": {
+    "id": 11,
+    "label": "traffic light",
+    "position": {
+      "x": -5.21,
+      "y": -8.99,
+      "z": 0.45
+    },
+    "confidence": 0.4474
+  },
+  "17": {
+    "id": 17,
+    "label": "airplane",
+    "position": {
+      "x": -8.8,
+      "y": -3.29,
+      "z": 0.79
+    },
+    "confidence": 0.425
+  },
+  "24": {
+    "id": 24,
+    "label": "traffic light",
+    "position": {
+      "x": -5.28,
+      "y": -8.19,
+      "z": 0.39
+    },
+    "confidence": 0.528
+  },
+  "25": {
+    "id": 25,
+    "label": "traffic light",
+    "position": {
+      "x": -4.94,
+      "y": -8.37,
+      "z": 0.41
+    },
+    "confidence": 0.3533
+  },
+  "30": {
+    "id": 30,
+    "label": "bottle",
+    "position": {
+      "x": -8.22,
+      "y": -8.96,
+      "z": 0.6
+    },
+    "confidence": 0.3338
+  },
+  "31": {
+    "id": 31,
+    "label": "traffic light",
+    "position": {
+      "x": -8.14,
+      "y": -8.03,
+      "z": 0.55
+    },
+    "confidence": 0.4185
+  },
+  "35": {
+    "id": 35,
+    "label": "bench",
+    "position": {
+      "x": -6.19,
+      "y": -1.16,
+      "z": 0.79
+    },
+    "confidence": 0.3575
+  },
+  "36": {
+    "id": 36,
+    "label": "chair",
+    "position": {
+      "x": -3.73,
+      "y": -0.99,
+      "z": 0.4
+    },
+    "confidence": 0.3642
+  },
+  "38": {
+    "id": 38,
+    "label": "chair",
+    "position": {
+      "x": -3.5,
+      "y": 5.99,
+      "z": 0.63
+    },
+    "confidence": 0.4039
+  },
+  "40": {
+    "id": 40,
+    "label": "traffic light",
+    "position": {
+      "x": -2.23,
+      "y": 1.5,
+      "z": 0.64
+    },
+    "confidence": 0.4209
+  },
+  "44": {
+    "id": 44,
+    "label": "traffic light",
+    "position": {
+      "x": -2.38,
+      "y": 1.95,
+      "z": 0.69
+    },
+    "confidence": 0.6263
+  },
+  "52": {
+    "id": 52,
+    "label": "bench",
+    "position": {
+      "x": -4.41,
+      "y": -0.31,
+      "z": 0.4
+    },
+    "confidence": 0.4149
+  },
+  "65": {
+    "id": 65,
+    "label": "oven",
+    "position": {
+      "x": -3.19,
+      "y": 6.3,
+      "z": 0.31
+    },
+    "confidence": 0.4022
+  }
+}

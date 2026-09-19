@@ -155,7 +155,10 @@ static std::vector<float> dijkstraFromGoal(const GridMap& m,int ggx,int ggy,doub
             int ni=ny*m.cols+nx; if(blocked[ni]) continue;
             // prevent corner cutting
             if(dx[k]!=0&&dy[k]!=0){ if(blocked[cy*m.cols+nx]||blocked[ny*m.cols+cx]) continue; }
-            float nc=c+w[k]*(float)m.res;
+            // clearance-weighted cost: prefer corridor centers (critical for long car body)
+            float dcc=m.dist[ni];
+            float extra=(dcc<2.0f)?2.0f*(2.0f-dcc):0.0f;
+            float nc=c+w[k]*(float)m.res*(1.0f+extra);
             if(nc<cost[ni]){ cost[ni]=nc; pq.emplace(nc,ni); }
         }
     }
@@ -193,6 +196,18 @@ static std::vector<Pose2D> descentPath(const GridMap& m,const std::vector<float>
     return path;
 }
 
+// append exact goal then smooth yaw over last points (avoid infeasible kink)
+static void appendGoalSmooth(std::vector<Pose2D>& out,const Pose2D& goal){
+    out.push_back({goal.x,goal.y,goal.yaw,0,0,out.empty()?1:out.back().dir});
+    if(out.size()>=7){
+        double base=out[out.size()-6].yaw;
+        double d=normAng(goal.yaw-base);
+        for(size_t k=out.size()-5;k<out.size();k++){
+            double t=(double)(k-(out.size()-5))/4.0; // k=size-1 -> t=1 exact goal yaw
+            out[k].yaw=normAng(base+d*t*t);
+        }
+    }
+}
 // ---------------- Hybrid A* (parking) ----------------
 struct HANode{ double x,y,yaw,g; int parent; int8_t si; int8_t dir; };
 static std::vector<Pose2D> hybridAStar(const Pose2D& start,const Pose2D& goal,
@@ -230,33 +245,39 @@ static std::vector<Pose2D> hybridAStar(const Pose2D& start,const Pose2D& goal,
         const HANode cur=nodes[ii];
         exp++;
         double dg=std::hypot(cur.x-goal.x,cur.y-goal.y);
-        if(dg<0.75&&angDiff(cur.yaw,goal.yaw)<0.35){ goalIdx=ii; break; }
-        // analytic connect when close
-        if(dg<6.0&&exp%1500==0){
+        if(dg<0.4&&angDiff(cur.yaw,goal.yaw)<0.2){
+            // accept only if goal lies ahead in travel direction (no overshoot+jump-back)
+            double dot=(goal.x-cur.x)*std::cos(cur.yaw)+(goal.y-cur.y)*std::sin(cur.yaw);
+            if(dot*(double)cur.dir>-0.05){ goalIdx=ii; break; }
+        }
+        // analytic connect when close (greedy pursuit, per-step direction)
+        if(dg<8.0&&exp%800==0){
             // greedy pursuit simulation toward goal
             Pose2D s{cur.x,cur.y,cur.yaw,0,cur.dir>0?0:0}; s.delta=0;
-            // find last delta: approximate 0
-            std::vector<Pose2D> trial; trial.push_back(s);
+            std::vector<std::pair<Pose2D,int>> trial; trial.emplace_back(s,1);
             bool ok=true;
             Pose2D q=s;
-            for(int k=0;k<45;k++){
+            for(int k=0;k<80;k++){
+                double dpos=std::hypot(goal.x-q.x,goal.y-q.y);
                 double want=std::atan2(goal.y-q.y,goal.x-q.x);
                 double e=normAng(want-q.yaw);
                 // choose direction: prefer current dir sign; flip if goal behind and reverse allowed
                 double dirS = 1.0;
                 if(allowReverse && std::abs(e)>M_PI/2){ dirS=-1.0; e=normAng(e+M_PI); }
-                double td=clampD(2.0*e,-p.max_steer,p.max_steer);
+                double w=clampD(1.0-dpos/4.0,0.0,1.0); // near goal: also align yaw
+                double ey=normAng(goal.yaw-q.yaw)*(dirS>0?1.0:-1.0);
+                double td=clampD(1.8*e+1.4*ey*w,-p.max_steer,p.max_steer);
                 q=stepModel(q,dirS*SPEED,td,0.25/SPEED*1.0,p);
                 if(collideAt(q.x,q.y,q.yaw,m,p,clearance)){ ok=false; break; }
-                trial.push_back(q);
-                if(std::hypot(q.x-goal.x,q.y-goal.y)<0.6&&angDiff(q.yaw,goal.yaw)<0.35){
+                trial.emplace_back(q,(int)dirS);
+                if(std::hypot(q.x-goal.x,q.y-goal.y)<0.3&&angDiff(q.yaw,goal.yaw)<0.2){
                     // stitch: build full path from ii + trial
                     std::vector<HANode> chain; int t=ii; while(t>=0){chain.push_back(nodes[t]); t=nodes[t].parent;}
                     std::reverse(chain.begin(),chain.end());
                     std::vector<Pose2D> out;
                     for(auto& n:chain) out.push_back({n.x,n.y,n.yaw,0,0,n.dir});
-                    for(size_t k2=1;k2<trial.size();k2++){ auto qq=trial[k2]; qq.dir=(dirS>0?1:-1); out.push_back({qq.x,qq.y,qq.yaw,0,0,(int)dirS}); }
-                    out.push_back({goal.x,goal.y,goal.yaw,0,0,(int)dirS});
+                    for(size_t k2=1;k2<trial.size();k2++){ auto qq=trial[k2].first; qq.dir=trial[k2].second; out.push_back({qq.x,qq.y,qq.yaw,0,0,qq.dir}); }
+                    appendGoalSmooth(out,goal);
                     std::cerr<<"[Plan] analytic connect ok at exp "<<exp<<"\n";
                     return out;
                 }
@@ -278,9 +299,9 @@ static std::vector<Pose2D> hybridAStar(const Pose2D& start,const Pose2D& goal,
                 if(hit) continue;
                 gadd += std::abs(steers[s2])*0.15 + (s2!=nodes[ii].si?0.1:0);
                 if(d!=nodes[ii].dir) gadd+=3.0; // cusp (direction switch) penalty -> fewer, cleaner maneuvers
-                // clearance penalty
+                // clearance penalty (push path away from obstacles)
                 float dc=m.distWorld(q.x,q.y);
-                if(dc<0.6) gadd += (0.6-dc)*2.0;
+                if(dc<0.9) gadd += (0.9-dc)*4.0;
                 double ng=cur.g+gadd;
                 int vi=vidx(q.x,q.y,q.yaw);
                 if(ng<best[vi]-1e-6){
@@ -308,7 +329,7 @@ static std::vector<Pose2D> hybridAStar(const Pose2D& start,const Pose2D& goal,
         for(int k=0;k<(int)SUBN;k++){ q=stepModel(q,(double)cu.dir*SPEED,td,(PRIM/SUBN)/SPEED,p);
             q.dir=cu.dir; out.push_back({q.x,q.y,q.yaw,0,0,cu.dir}); }
     }
-    out.push_back({goal.x,goal.y,goal.yaw,0,0,out.back().dir});
+    appendGoalSmooth(out,goal);
     return out;
 }
 
@@ -350,6 +371,41 @@ static void assignSpeeds(std::vector<Pose2D>& path,const VehicleParams& pr,doubl
         }
     }
     if(!path.empty()) path.back().v=0;
+}
+
+// min distance-to-obstacle over vehicle body samples (for speed control)
+static float bodyMinDist(double x,double y,double yaw,const GridMap& m,const VehicleParams& p){
+    double xr=-p.rear_overhang, xf=p.wheelbase+p.front_overhang, hw=p.width/2.0;
+    double cy=std::cos(yaw), sy=std::sin(yaw);
+    float best=1e9f;
+    for(double lx=xr; lx<=xf+1e-6; lx+=0.8){
+        for(double ly=-hw; ly<=hw+1e-6; ly+=0.9){
+            double wx=x+lx*cy-ly*sy, wy=y+lx*sy+ly*cy;
+            int gx,gy; if(!m.worldToGrid(wx,wy,gx,gy)) return 0;
+            best=std::min(best,m.dist[gy*m.cols+gx]);
+        }
+    }
+    return best;
+}
+// push footprint-colliding waypoints away from obstacles along dist gradient
+static void repairFootprint(std::vector<Pose2D>& path,const GridMap& m,const VehicleParams& p){
+    for(int it=0;it<25;it++){
+        bool any=false;
+        for(size_t i=1;i+1<path.size();i++){
+            if(!collideAt(path[i].x,path[i].y,path[i].yaw,m,p,0.12)){
+                // verify edge midpoints too via segment checks to neighbors
+                if(!segCollision(path[i-1].x,path[i-1].y,path[i-1].yaw,path[i].x,path[i].y,path[i].yaw,m,p,0.10)) continue;
+            }
+            any=true;
+            double e=0.3;
+            double gx=(m.distWorld(path[i].x+e,path[i].y)-m.distWorld(path[i].x-e,path[i].y))/(2*e);
+            double gy=(m.distWorld(path[i].x,path[i].y+e)-m.distWorld(path[i].x,path[i].y-e))/(2*e);
+            double n=std::hypot(gx,gy)+1e-9;
+            path[i].x+=0.25*gx/n; path[i].y+=0.25*gy/n;
+        }
+        path=smoothTangent(path);
+        if(!any) break;
+    }
 }
 
 // ---------------- TCP helpers ----------------
@@ -418,7 +474,7 @@ int main(int argc,char** argv){
     if(scen==0||scen==1){
         int ggx,ggy; m.worldToGrid(goal.x,goal.y,ggx,ggy);
         auto h=dijkstraFromGoal(m,ggx,ggy,0.35);
-        double clr = (scen==1?0.20:0.12);
+        double clr = (scen==1?0.35:0.12);
         auto t0=std::chrono::steady_clock::now();
         path=hybridAStar(start,goal,m,vp,h,true,clr);
         auto t1=std::chrono::steady_clock::now();
@@ -461,6 +517,9 @@ int main(int argc,char** argv){
         for(size_t i=0;i<full.size();i++){ double t=(double)i/full.size();
             if(t>0.93){ double b=(t-0.93)/0.07; full[i].yaw=normAng(full[i].yaw*(1-b)+goal.yaw*b); } }
         for(auto& q:full) q.dir=1;
+        repairFootprint(full,m,vp);
+        { int bad=0; for(auto& q:full) if(collideAt(q.x,q.y,q.yaw,m,vp,0.05)) bad++;
+          std::cout<<"Footprint violations after repair: "<<bad<<"/"<<full.size()<<"\n"; }
         path=full;
         assignSpeeds(path,vp,1.9);
     }
@@ -485,7 +544,7 @@ int main(int argc,char** argv){
         for(int i=lo;i<hi;i++){ double d=std::hypot(path[i].x-x,path[i].y-y); if(d<bd){bd=d;best=i;} }
         return best;
     };
-    int cur=0, cuspHold=0, settle=0;
+    int cur=0, cuspHold=0, settle=0, dockDir=0;
     double lastDelta=0;
     while(true){
         char b[8192]; ssize_t n=read(sock,b,sizeof(b)-1);
@@ -498,30 +557,36 @@ int main(int argc,char** argv){
         std::istringstream ts(lastLine);
         std::string tag; uint64_t step; double tms,cx,cy,cyaw,cv,cd; int coll,done;
         ts>>tag>>step>>tms>>cx>>cy>>cyaw>>cv>>cd>>coll>>done;
-        if(coll){ std::cout<<"Collision, stop\n"; break; }
+        if(coll){ std::cout<<"Collision at "<<cx<<","<<cy<<","<<cyaw<<" dist="<<m.distWorld(cx,cy)<<" occ="<<m.occWorld(cx,cy)<<"\n"; break; }
         if(done){ std::cout<<"Goal reached!\n"; break; }
         if(step>6000){ std::cout<<"step limit\n"; sendAll(sock,"CTRL 0 0\n"); break; }
         cur=nearestAhead(cx,cy,cur);
         curFloor=std::max(curFloor,cur-5);
         double dg=std::hypot(goal.x-cx,goal.y-cy);
         double cmdV, cmdD;
-        if(dg<0.8||cur>=(int)path.size()-3){
-            // final docking: P on distance, steer to goal yaw when close
-            if(dg<0.35&&angDiff(cyaw,goal.yaw)<0.25){ sendAll(sock,"CTRL 0 0\n"); settle++; continue; }
-            settle=0;
-            double want = (dg>0.45)? std::atan2(goal.y-cy,goal.x-cx) : goal.yaw;
-            double e=normAng(want-cyaw);
-            double dirS=1.0;
-            if(std::abs(e)>M_PI/2&&dg>0.45){ dirS=-1.0; e=normAng(e+M_PI); }
-            if(dirS<0) e=normAng(std::atan2(goal.y-cy,goal.x-cx)-cyaw-M_PI);
-            cmdD=clampD(1.6*e,-vp.max_steer,vp.max_steer);
-            cmdV=clampD(0.7*dg,-0.4,0.4)*dirS;
-            if(std::abs(cmdV)<0.08&&dg>0.15) cmdV=(dirS>0?0.2:-0.2);
+        if(dg>1.5) dockDir=0; // allow fresh pick if we leave the dock zone
+        if(dg<0.45||(cur>=(int)path.size()-2&&dg<1.2)){
+            // final docking with latched direction + early stop inside tolerance
+            if(dg<0.36&&angDiff(cyaw,goal.yaw)<0.26){ sendAll(sock,"CTRL 0 0\n"); continue; }
+            double bearing=std::atan2(goal.y-cy,goal.x-cx);
+            double ef=normAng(bearing-cyaw), er=normAng(bearing-cyaw-M_PI);
+            if(dockDir==0) dockDir=(std::abs(ef)<=std::abs(er))?1:-1;
+            else if(dockDir==1&&std::abs(er)<std::abs(ef)-0.5) dockDir=-1;
+            else if(dockDir==-1&&std::abs(ef)<std::abs(er)-0.5) dockDir=1;
+            double e=(dockDir>0)?ef:er;
+            // close-in: blend toward goal yaw so we arrive aligned
+            if(dg<0.55){ double ey=normAng(goal.yaw-cyaw)*(dockDir>0?1.0:-1.0);
+                // for reverse, yaw decreases with left steer; blend carefully:
+                e = (dockDir>0)? (0.5*e+0.5*normAng(goal.yaw-cyaw)) : (0.6*e-0.4*normAng(goal.yaw-cyaw)); }
+            cmdD=clampD(1.8*e,-vp.max_steer,vp.max_steer);
+            cmdV=clampD(0.5*dg,-0.22,0.22)*(dockDir>0?1:-1);
+            if(dg>0.15&&std::abs(cmdV)<0.1) cmdV=(dockDir>0?0.12:-0.12);
         } else {
             int look=cur;
             bool parking = (scen==0||scen==1);
             double Ld = parking ? clampD(1.0+0.4*std::abs(cv),1.0,1.6)
                                 : clampD(1.6+0.7*std::abs(cv),1.4,3.2);
+            if(!parking&&dg<4.0) Ld=std::min(Ld,1.3); // tight endgame for yaw alignment
             double acc=0;
             while(look+1<(int)path.size()){ acc+=std::hypot(path[look+1].x-path[look].x,path[look+1].y-path[look].y); look++; if(acc>=Ld) break; }
             // cusp handling: direction flip within lookahead -> creep to cusp, stop, skip past
@@ -542,16 +607,17 @@ int main(int argc,char** argv){
             }
             else {
                 cuspHold=0;
-                // slow down when close to obstacles (tracking margin)
+                // slow down when close to obstacles (body-aware tracking margin)
                 bool parking2=(scen==0||scen==1);
-                double dd_=m.distWorld(cx,cy);
+                double dd_=bodyMinDist(cx,cy,cyaw,m,vp);
                 double slowF= parking2 ? clampD((dd_-0.20)/0.6,0.25,1.0)
-                                       : clampD((dd_-0.25)/1.0,0.3,1.0);
+                                       : clampD((dd_-0.30)/0.9,0.25,1.0);
                 double tx=path[look].x, ty=path[look].y;
                 if(dirS<0){
                     // reverse: heading-P referenced to rear axis, tight lookahead
+                    double rLd = (dg<1.5)?0.8:1.2;
                     int rlook=cur; double racc=0;
-                    while(rlook+1<(int)path.size()){ racc+=std::hypot(path[rlook+1].x-path[rlook].x,path[rlook+1].y-path[rlook].y); rlook++; if(racc>=1.2) break; }
+                    while(rlook+1<(int)path.size()){ racc+=std::hypot(path[rlook+1].x-path[rlook].x,path[rlook+1].y-path[rlook].y); rlook++; if(racc>=rLd) break; }
                     double e=normAng(std::atan2(path[rlook].y-cy,path[rlook].x-cx)-cyaw-M_PI);
                     cmdD=clampD(2.0*e,-vp.max_steer,vp.max_steer);
                     double pv=path[cur].v!=0?path[cur].v:-0.6;
@@ -566,6 +632,7 @@ int main(int argc,char** argv){
                     cmdV=clampD(pv,-1.6,2.2)*slowF;
                     // slow in curves
                     cmdV*=clampD(1.0-std::abs(cmdD)/vp.max_steer*0.5,0.45,1.0);
+                    if(!parking&&dg<4.0) cmdV=std::min(cmdV,0.9); // nav endgame
                     if(dirS>0&&std::abs(cmdV)<0.15&&cur<(int)path.size()-3) cmdV=0.12;
                 }
             }
