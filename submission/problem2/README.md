@@ -1,5 +1,11 @@
 # PS02: Semantic Mapping of an Indoor Environment
 
+## Demo Video
+
+[![Demo Video](https://img.youtube.com/vi/yKyAMs5Lchg/hqdefault.jpg)](https://youtu.be/yKyAMs5Lchg)
+
+Watch the demo: https://youtu.be/yKyAMs5Lchg
+
 ## Overview
 
 ROS 2 (Humble) semantic-mapping pipeline for a TurtleBot 4 with OAK-D RGB-D camera in Ignition Gazebo. A perception node runs YOLO instance segmentation with persistent tracking (ByteTrack), lifts each mask centroid to 3D with aligned depth + camera intrinsics, transforms it into the `map` frame via TF2, and maintains a persistent `map.json` keyed by track ID. A companion navigator node reads `map.json`, sends the best-confidence match to Nav2, and publishes RViz label markers.
