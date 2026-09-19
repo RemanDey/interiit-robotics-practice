@@ -1,5 +1,13 @@
 # Fleet-Telemetry-System: Olympiad-Calibre Deconstruction
 
+## 🎬 Demo Video
+
+[![Fleet Telemetry System Demo](https://img.youtube.com/vi/Uo0r4DJiyb4/0.jpg)](https://youtu.be/Uo0r4DJiyb4)
+
+Watch the full demo: https://youtu.be/Uo0r4DJiyb4
+
+---
+
 ## 0. One-Line Theorem
 
 This is an **on-demand, bidirectional, 4-language, file-coupled cyber-physical simulation with a hybrid dispatch layer**: `C++` parks physics at base → `telemetry.json` carries snapshots forward → `Python/FastAPI + FleetManager` serves them and scores delivery requests → `commands.json` carries takeoff orders back → `C++` consumes them on liftoff → `React/Leaflet + RequestPage` renders everything and sources new demand. There is no database and no websocket.

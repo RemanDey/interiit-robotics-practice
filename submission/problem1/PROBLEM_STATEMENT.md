@@ -1,3 +1,11 @@
+## 🎬 Demo Video
+
+[![Fleet Telemetry System Demo](https://img.youtube.com/vi/Uo0r4DJiyb4/0.jpg)](https://youtu.be/Uo0r4DJiyb4)
+
+Watch the full demo: https://youtu.be/Uo0r4DJiyb4
+
+---
+
 ================================================================================
 PROBLEM STATEMENT 01: DRONE FLEET MANAGEMENT FOR TIMED DELIVERIES
 SYSTEM SPECIFICATION & PROMPT FOR AI AGENT / TECHNICAL IMPLEMENTATION

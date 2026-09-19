@@ -1,5 +1,13 @@
 # `dashboard/display/` — React + Leaflet frontend (map + request page)
 
+## 🎬 Demo Video
+
+[![Fleet Telemetry System Demo](https://img.youtube.com/vi/Uo0r4DJiyb4/0.jpg)](https://youtu.be/Uo0r4DJiyb4)
+
+Watch the full demo: https://youtu.be/Uo0r4DJiyb4
+
+---
+
 ## Stack
 
 Vite 8 + React 19 + `react-leaflet@5` + `leaflet@1.9.4` +
