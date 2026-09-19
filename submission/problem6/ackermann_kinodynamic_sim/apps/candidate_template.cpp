@@ -277,6 +277,7 @@ static std::vector<Pose2D> hybridAStar(const Pose2D& start,const Pose2D& goal,
                 }
                 if(hit) continue;
                 gadd += std::abs(steers[s2])*0.15 + (s2!=nodes[ii].si?0.1:0);
+                if(d!=nodes[ii].dir) gadd+=3.0; // cusp (direction switch) penalty -> fewer, cleaner maneuvers
                 // clearance penalty
                 float dc=m.distWorld(q.x,q.y);
                 if(dc<0.6) gadd += (0.6-dc)*2.0;
@@ -356,6 +357,7 @@ static bool sendAll(int s,const std::string& d){ size_t n=0; while(n<d.size()){ 
 
 // ---------------- main ----------------
 int main(int argc,char** argv){
+    std::cout.setf(std::ios::unitbuf);
     std::string ip="127.0.0.1"; int port=8091;
     if(argc>1) ip=argv[1]; if(argc>2) port=std::atoi(argv[2]);
     std::cout<<"Candidate solver connecting "<<ip<<":"<<port<<"\n";
@@ -399,6 +401,9 @@ int main(int argc,char** argv){
              <<" goal "<<goal.x<<","<<goal.y<<","<<goal.yaw<<"\n";
     GridMap m; m.cols=cols;m.rows=rows;m.res=res;m.ox=ox;m.oy=oy;m.occ=grid; m.buildDist();
     std::cout<<"Dist map built\n";
+    std::cout<<"probe car(-15.5,-8) occ="<<m.occWorld(-15.5,-8)<<" dist="<<m.distWorld(-15.5,-8)<<"\n";
+    std::cout<<"probe graze(-14.45,-5.54) occ="<<m.occWorld(-14.45,-5.54)<<" dist="<<m.distWorld(-14.45,-5.54)<<"\n";
+    std::cout<<"probe gap(-12,-8) occ="<<m.occWorld(-12,-8)<<" dist="<<m.distWorld(-12,-8)<<"\n";
     // classify
     auto isNear=[](double a,double b){return std::abs(a-b)<1.5;};
     int scen=2;
@@ -413,8 +418,11 @@ int main(int argc,char** argv){
     if(scen==0||scen==1){
         int ggx,ggy; m.worldToGrid(goal.x,goal.y,ggx,ggy);
         auto h=dijkstraFromGoal(m,ggx,ggy,0.35);
-        double clr = (scen==1?0.08:0.12);
+        double clr = (scen==1?0.20:0.12);
+        auto t0=std::chrono::steady_clock::now();
         path=hybridAStar(start,goal,m,vp,h,true,clr);
+        auto t1=std::chrono::steady_clock::now();
+        std::cout<<"Hybrid plan ms="<<std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count()<<"\n";
         if(path.empty()){ std::cerr<<"hybrid failed, fallback straight\n";
             for(int i=0;i<=60;i++){double t=(double)i/60; Pose2D q{start.x+(goal.x-start.x)*t,start.y+(goal.y-start.y)*t,normAng(start.yaw+normAng(goal.yaw-start.yaw)*t),0.5,0,1}; path.push_back(q);} }
         assignSpeeds(path,vp,0.9);
@@ -457,6 +465,9 @@ int main(int argc,char** argv){
         assignSpeeds(path,vp,1.9);
     }
     std::cout<<"Planned pts="<<path.size()<<"\n";
+    { std::cout<<"Path tail (last 30):\n"; size_t s0=path.size()>30?path.size()-30:0;
+      for(size_t i=s0;i<path.size();i++) std::cout<<"  i="<<i<<" "<<path[i].x<<","<<path[i].y<<","<<path[i].yaw<<" dir="<<path[i].dir<<" v="<<path[i].v<<"\n"; }
+    { FILE* f=fopen("/tmp/planned_path.csv","w"); for(auto& q:path) fprintf(f,"%.3f,%.3f,%.3f,%d,%.2f\n",q.x,q.y,q.yaw,q.dir,q.v); fclose(f); }
     // upload TRAJ
     {
         std::ostringstream ss; ss<<"TRAJ ";
@@ -464,15 +475,17 @@ int main(int argc,char** argv){
         ss<<"\n"; sendAll(sock,ss.str());
         std::cout<<"TRAJ uploaded "<<ss.str().size()<<" bytes\n";
     }
-    // ---- closed-loop pure pursuit ----
-    std::string leftover; int stuckCnt=0;
+    // ---- closed-loop tracking (pure pursuit fwd / heading-P rev + docking) ----
+    std::string leftover;
+    int curFloor=0; // monotonic floor so cusp-skips stick
     auto nearestAhead=[&](double x,double y,int from)->int{
         int best=from; double bd=1e18;
-        int W=std::min((int)path.size(),from+400);
-        for(int i=from;i<W;i++){ double d=std::hypot(path[i].x-x,path[i].y-y); if(d<bd){bd=d;best=i;} }
+        int lo=std::max({0,from-10,curFloor-3});
+        int hi=std::min((int)path.size(),from+400);
+        for(int i=lo;i<hi;i++){ double d=std::hypot(path[i].x-x,path[i].y-y); if(d<bd){bd=d;best=i;} }
         return best;
     };
-    int cur=0;
+    int cur=0, cuspHold=0, settle=0;
     double lastDelta=0;
     while(true){
         char b[8192]; ssize_t n=read(sock,b,sizeof(b)-1);
@@ -489,49 +502,79 @@ int main(int argc,char** argv){
         if(done){ std::cout<<"Goal reached!\n"; break; }
         if(step>6000){ std::cout<<"step limit\n"; sendAll(sock,"CTRL 0 0\n"); break; }
         cur=nearestAhead(cx,cy,cur);
+        curFloor=std::max(curFloor,cur-5);
         double dg=std::hypot(goal.x-cx,goal.y-cy);
         double cmdV, cmdD;
-        if(dg<1.3){
+        if(dg<0.8||cur>=(int)path.size()-3){
             // final docking: P on distance, steer to goal yaw when close
+            if(dg<0.35&&angDiff(cyaw,goal.yaw)<0.25){ sendAll(sock,"CTRL 0 0\n"); settle++; continue; }
+            settle=0;
             double want = (dg>0.45)? std::atan2(goal.y-cy,goal.x-cx) : goal.yaw;
             double e=normAng(want-cyaw);
             double dirS=1.0;
             if(std::abs(e)>M_PI/2&&dg>0.45){ dirS=-1.0; e=normAng(e+M_PI); }
-            cmdD=clampD(2.2*e,-vp.max_steer,vp.max_steer);
-            cmdV=clampD(0.9*dg,-0.5,0.6)*dirS;
-            if(dg<0.4&&angDiff(cyaw,goal.yaw)<0.28){ cmdV=0; cmdD=goal.yaw>cyaw?0.2:-0.2;
-                // settle: hold zero
-                static int settle=0; if(++settle>15){ sendAll(sock,"CTRL 0 0\n"); } }
-            if(std::abs(cmdV)<0.08&&dg>0.15) cmdV=(dirS>0?0.25:-0.25);
+            if(dirS<0) e=normAng(std::atan2(goal.y-cy,goal.x-cx)-cyaw-M_PI);
+            cmdD=clampD(1.6*e,-vp.max_steer,vp.max_steer);
+            cmdV=clampD(0.7*dg,-0.4,0.4)*dirS;
+            if(std::abs(cmdV)<0.08&&dg>0.15) cmdV=(dirS>0?0.2:-0.2);
         } else {
             int look=cur;
-            double Ld=clampD(1.6+0.7*std::abs(cv),1.4,3.2);
+            bool parking = (scen==0||scen==1);
+            double Ld = parking ? clampD(1.0+0.4*std::abs(cv),1.0,1.6)
+                                : clampD(1.6+0.7*std::abs(cv),1.4,3.2);
             double acc=0;
             while(look+1<(int)path.size()){ acc+=std::hypot(path[look+1].x-path[look].x,path[look+1].y-path[look].y); look++; if(acc>=Ld) break; }
-            // cusp handling: if direction flip within lookahead, stop first
-            bool cusp=false;
-            for(int i=cur;i<=look&&i<(int)path.size();i++) if(path[i].dir!=path[cur].dir){ cusp=true; look=i; break; }
-            double tx=path[look].x, ty=path[look].y;
-            double alpha=normAng(std::atan2(ty-cy,tx-cx)-cyaw);
+            // cusp handling: direction flip within lookahead -> creep to cusp, stop, skip past
+            int cuspIdx=-1;
+            for(int i=cur;i<=look&&i<(int)path.size();i++) if(path[i].dir!=path[cur].dir){ cuspIdx=i; break; }
             int dirS=path[cur].dir;
-            if(cusp){ cmdV=0; cmdD=lastDelta; }
+            if(cuspIdx>=0){
+                double dc=std::hypot(path[cuspIdx].x-cx,path[cuspIdx].y-cy);
+                if(dc>0.6){
+                    look=cuspIdx;
+                    double tx=path[look].x, ty=path[look].y;
+                    double e = (dirS>0)? normAng(std::atan2(ty-cy,tx-cx)-cyaw)
+                                       : normAng(std::atan2(ty-cy,tx-cx)-cyaw-M_PI);
+                    cmdD=clampD(2.0*e,-vp.max_steer,vp.max_steer);
+                    cmdV=0.4*dirS;
+                    cuspHold=0;
+                } else { cmdV=0; cmdD=lastDelta; if(++cuspHold>15){ cur=std::min(cuspIdx+2,(int)path.size()-1); curFloor=cur; cuspHold=0; } }
+            }
             else {
-                double R=Ld/(2*std::sin(alpha)+1e-9);
-                double dd=std::atan(vp.wheelbase/R);
-                // for reverse, mirror
-                if(dirS<0) dd=clampD(std::atan(vp.wheelbase*2*std::sin(alpha)/Ld),-vp.max_steer,vp.max_steer);
-                else dd=clampD(dd,-vp.max_steer,vp.max_steer);
-                cmdD=dd;
-                double pv=path[cur].v!=0?path[cur].v:1.0*dirS;
-                cmdV=clampD(pv,-1.6,2.2);
-                // slow in curves
-                cmdV*=clampD(1.0-std::abs(cmdD)/vp.max_steer*0.5,0.45,1.0);
+                cuspHold=0;
+                // slow down when close to obstacles (tracking margin)
+                bool parking2=(scen==0||scen==1);
+                double dd_=m.distWorld(cx,cy);
+                double slowF= parking2 ? clampD((dd_-0.20)/0.6,0.25,1.0)
+                                       : clampD((dd_-0.25)/1.0,0.3,1.0);
+                double tx=path[look].x, ty=path[look].y;
+                if(dirS<0){
+                    // reverse: heading-P referenced to rear axis, tight lookahead
+                    int rlook=cur; double racc=0;
+                    while(rlook+1<(int)path.size()){ racc+=std::hypot(path[rlook+1].x-path[rlook].x,path[rlook+1].y-path[rlook].y); rlook++; if(racc>=1.2) break; }
+                    double e=normAng(std::atan2(path[rlook].y-cy,path[rlook].x-cx)-cyaw-M_PI);
+                    cmdD=clampD(2.0*e,-vp.max_steer,vp.max_steer);
+                    double pv=path[cur].v!=0?path[cur].v:-0.6;
+                    cmdV=clampD(pv,-0.6,-0.15)*slowF;
+                    if(std::abs(cmdV)<0.15) cmdV=-0.15;
+                } else {
+                    double alpha=normAng(std::atan2(ty-cy,tx-cx)-cyaw);
+                    double R=Ld/(2*std::sin(alpha)+1e-9);
+                    double dd=clampD(std::atan(vp.wheelbase/R),-vp.max_steer,vp.max_steer);
+                    cmdD=dd;
+                    double pv=path[cur].v!=0?path[cur].v:1.0;
+                    cmdV=clampD(pv,-1.6,2.2)*slowF;
+                    // slow in curves
+                    cmdV*=clampD(1.0-std::abs(cmdD)/vp.max_steer*0.5,0.45,1.0);
+                    if(dirS>0&&std::abs(cmdV)<0.15&&cur<(int)path.size()-3) cmdV=0.12;
+                }
             }
         }
         // steer rate limit on command side
         double mx=vp.max_steer_rate*0.06;
         cmdD=lastDelta+clampD(cmdD-lastDelta,-mx,mx);
         lastDelta=cmdD;
+        if(step%25==0) std::cout<<"st="<<step<<" pos="<<cx<<","<<cy<<","<<cyaw<<" cur="<<cur<<"/"<<path.size()<<" dg="<<dg<<" cmd="<<cmdV<<","<<cmdD<<"\n";
         std::ostringstream cs; cs<<"CTRL "<<cmdV<<" "<<cmdD<<"\n";
         if(!sendAll(sock,cs.str())) break;
     }

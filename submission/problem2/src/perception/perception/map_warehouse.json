@@ -1,0 +1,32 @@
+{
+  "1": {
+    "id": 1,
+    "label": "person",
+    "position": {
+      "x": 0.83,
+      "y": -0.51,
+      "z": 0.31
+    },
+    "confidence": 0.3726
+  },
+  "26": {
+    "id": 26,
+    "label": "surfboard",
+    "position": {
+      "x": -2.21,
+      "y": 0.98,
+      "z": 0.03
+    },
+    "confidence": 0.3618
+  },
+  "28": {
+    "id": 28,
+    "label": "surfboard",
+    "position": {
+      "x": -2.24,
+      "y": 1.02,
+      "z": 0.03
+    },
+    "confidence": 0.307
+  }
+}
