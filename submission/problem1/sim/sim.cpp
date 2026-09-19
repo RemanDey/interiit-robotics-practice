@@ -227,6 +227,6 @@ int main() {
     if (result != 0) cout << "Failed to write telemetry\n";
 
     cout << "Tick " << tick++ << " written to telemetry.json" << endl;
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
   }
 }
