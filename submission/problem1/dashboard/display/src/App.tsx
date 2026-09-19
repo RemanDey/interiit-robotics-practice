@@ -45,6 +45,15 @@ type Pad = {
   queue: number[];
 };
 
+type FleetRequest = {
+  package_id: string;
+  status: string;
+  destination?: { lat: number; lng: number; address?: string };
+  assigned_drone?: number | null;
+  allotted_drone?: number | null;
+  queue_position?: number | null;
+};
+
 const BASE_LAT = 31.7812939;
 const BASE_LNG = 76.997502;
 
@@ -104,6 +113,15 @@ const destinationIcon = (droneId: number) => {
   });
 };
 
+const queuedIcon = (droneId: number) => {
+  return L.divIcon({
+    className: "dest-div-icon",
+    html: `<div class="queued-badge"><span>${droneId}</span></div>`,
+    iconSize: [30, 28],
+    iconAnchor: [15, 14],
+  });
+};
+
 const padIcon = (padId: number, occupied: boolean) => {
   const color = occupied ? "#0072BD" : "#22C55E";
   const border = occupied ? "#0072BD" : "#16A34A";
@@ -132,7 +150,7 @@ function FocusDrone({ drone }: { drone: Drone | null }) {
 function Dashboard() {
   const [drones, setDrones] = useState<Drone[]>([]);
   const [chargingPads, setChargingPads] = useState<Pad[]>([]);
-  const [queuedRequests, setQueuedRequests] = useState<Array<{ package_id: string; status: string }>>([]);
+  const [queuedRequests, setQueuedRequests] = useState<FleetRequest[]>([]);
   const [selectedDrone, setSelectedDrone] = useState<Drone | null>(null);
   const [filter, setFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
@@ -183,6 +201,37 @@ function Dashboard() {
     if (filter === "ALL") return drones;
     return drones.filter((drone) => normalizeState(drone) === filter);
   }, [drones, filter]);
+
+  // Declutter delivery triangles: orders sharing the exact same drop point
+  // would stack pixel-perfect and look like one marker. Singles stay exact;
+  // groups spread on a small ring (~13 m) around the true point.
+  const spreadDeliveries = useMemo(() => {
+    const groups = new Map<string, number>();
+    queuedRequests.forEach((req) => {
+      const dest = req.destination;
+      if (!dest) return;
+      const key = `${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}`;
+      groups.set(key, (groups.get(key) ?? 0) + 1);
+    });
+    const seen = new Map<string, number>();
+    return queuedRequests.map((req) => {
+      const dest = req.destination;
+      if (!dest) return { req, lat: NaN, lng: NaN };
+      const key = `${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}`;
+      const total = groups.get(key) ?? 1;
+      const idx = seen.get(key) ?? 0;
+      seen.set(key, idx + 1);
+      if (total <= 1) return { req, lat: dest.lat, lng: dest.lng };
+      if (idx === 0) return { req, lat: dest.lat, lng: dest.lng };
+      const angle = ((idx - 1) / (total - 1)) * 2 * Math.PI - Math.PI / 2;
+      const ring = 0.00012 * Math.min(3, Math.ceil((total - 1) / 6));
+      return {
+        req,
+        lat: dest.lat + ring * Math.sin(angle),
+        lng: dest.lng + ring * Math.cos(angle),
+      };
+    });
+  }, [queuedRequests]);
 
   if (loading) {
     return <div className="loading">Loading fleet telemetry...</div>;
@@ -320,11 +369,22 @@ function Dashboard() {
               <p>No requests in queue.</p>
             ) : (
               <ul>
-                {queuedRequests.map((request, index) => (
-                  <li key={`${request.package_id ?? index}`}>
-                    {request.package_id ?? `Request ${index + 1}`}: {request.status}
-                  </li>
-                ))}
+                {queuedRequests.map((request, index) => {
+                  const drone =
+                    request.status === "assigned"
+                      ? request.assigned_drone
+                      : request.allotted_drone;
+                  return (
+                    <li key={`${request.package_id ?? index}`}>
+                      {request.package_id ?? `Request ${index + 1}`}: {request.status}
+                      {drone != null ? ` → Drone ${drone}` : ""}
+                      {request.status !== "assigned" &&
+                      request.queue_position != null
+                        ? ` (pos ${request.queue_position})`
+                        : ""}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -446,23 +506,52 @@ function Dashboard() {
                       Destination: {drone.destination.address}
                     </Popup>
                   </Marker>
-
-                  <Marker
-                    position={[drone.destination.lat, drone.destination.lng]}
-                    icon={destinationIcon(drone.id)}
-                  >
-                    <Tooltip direction="top" offset={[0, -14]} opacity={1}>
-                      <strong>Destination for Drone #{drone.id}</strong>
-                      <br />
-                      {drone.destination.address}
-                    </Tooltip>
-                    <Popup>
-                      <strong>Destination for Drone #{drone.id}</strong>
-                      <br />
-                      {drone.destination.address}
-                    </Popup>
-                  </Marker>
                 </div>
+              );
+            })}
+
+            {spreadDeliveries.map(({ req, lat, lng }, i) => {
+              const active = req.status === "assigned";
+              const droneId = active ? req.assigned_drone : req.allotted_drone;
+              const dest = req.destination;
+              if (!dest || droneId == null || Number.isNaN(lat)) return null;
+              const label = req.package_id ?? `Request ${i + 1}`;
+              return (
+                <Marker
+                  key={`${label}`}
+                  position={[lat, lng]}
+                  icon={active ? destinationIcon(droneId) : queuedIcon(droneId)}
+                >
+                  <Tooltip direction="top" offset={[0, -14]} opacity={1}>
+                    <strong>
+                      {active ? "Delivery" : "Queued"} for Drone #{droneId}
+                    </strong>
+                    <br />
+                    {label}
+                    {!active && req.queue_position != null
+                      ? ` • position ${req.queue_position}`
+                      : ""}
+                    <br />
+                    {dest.address ?? ""}
+                  </Tooltip>
+                  <Popup>
+                    <strong>
+                      {active ? "Delivery" : "Queued delivery"} for Drone #{droneId}
+                    </strong>
+                    <br />
+                    Package: {label}
+                    <br />
+                    Status: {req.status}
+                    {!active && req.queue_position != null && (
+                      <>
+                        <br />
+                        Queue position: {req.queue_position}
+                      </>
+                    )}
+                    <br />
+                    {dest.address ?? ""}
+                  </Popup>
+                </Marker>
               );
             })}
           </MapContainer>
@@ -498,7 +587,11 @@ function Dashboard() {
             </div>
             <div className="legend-row">
               <span className="legend-swatch legend-destination" />
-              <span>Destination (drone #)</span>
+              <span>Delivery active (drone #)</span>
+            </div>
+            <div className="legend-row">
+              <span className="legend-swatch legend-queued" />
+              <span>Delivery queued (drone #)</span>
             </div>
           </div>
         </section>

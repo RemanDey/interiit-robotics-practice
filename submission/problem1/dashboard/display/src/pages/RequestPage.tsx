@@ -6,6 +6,8 @@ import L from "leaflet";
 type Decision = {
   accepted: boolean;
   selected_drone: number | null;
+  allotted_drone?: number | null;
+  queue_position?: number | null;
   reason: string;
   audit: Array<{
     drone_id: number;
@@ -188,7 +190,16 @@ export default function RequestPage() {
                 <strong>{decision.accepted ? "Accepted" : "Not assigned"}</strong>
                 <p>{decision.reason}</p>
                 {decision.selected_drone != null && (
-                  <p>Drone #{decision.selected_drone} selected.</p>
+                  <p>Drone #{decision.selected_drone} selected — flying now.</p>
+                )}
+                {!decision.accepted && decision.allotted_drone != null && (
+                  <p>
+                    Allotted to Drone #{decision.allotted_drone}
+                    {decision.queue_position != null
+                      ? ` (queue position ${decision.queue_position})`
+                      : ""}
+                    . Orange marker on the map; launches automatically on landing.
+                  </p>
                 )}
                 {decision.audit.length > 0 && (
                   <ul>

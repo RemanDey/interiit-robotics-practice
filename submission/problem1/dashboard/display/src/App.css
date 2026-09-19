@@ -383,6 +383,26 @@ body {
   padding-bottom: 4px;
 }
 
+.queued-badge {
+  width: 30px;
+  height: 28px;
+  background: #f59e0b;
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.3));
+}
+
+.queued-badge span {
+  color: #fff;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding-bottom: 4px;
+}
+
 .pad-div-icon {
   background: transparent;
   border: none;
@@ -494,6 +514,13 @@ body {
   border-radius: 0;
   background: #7c3aed;
   border-color: #7c3aed;
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+}
+
+.legend-queued {
+  border-radius: 0;
+  background: #f59e0b;
+  border-color: #f59e0b;
   clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
 }
 

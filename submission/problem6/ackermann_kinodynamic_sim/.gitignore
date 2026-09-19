@@ -1,0 +1,33 @@
+# Build directories
+build/
+bin/
+out/
+
+# Compiled executables
+simulator_node
+candidate_template
+candidate_client
+
+# Object and library files
+*.o
+*.obj
+*.so
+*.a
+*.dylib
+*.dll
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
