@@ -14,9 +14,9 @@ class FleetManager:
         self.drones: List[Dict[str, Any]] = []
         self.requests: List[Dict[str, Any]] = []
         self.charging_pads: List[Dict[str, Any]] = [
-            {"id": 1, "occupied_by": None, "time_remaining": 0, "queue": []},
-            {"id": 2, "occupied_by": None, "time_remaining": 0, "queue": []},
-            {"id": 3, "occupied_by": None, "time_remaining": 0, "queue": []},
+            {"id": 1, "lat": 31.7812939, "lng": 76.997502, "occupied_by": None, "time_remaining": 0, "queue": []},
+            {"id": 2, "lat": 31.7813939, "lng": 76.997602, "occupied_by": None, "time_remaining": 0, "queue": []},
+            {"id": 3, "lat": 31.7811939, "lng": 76.997402, "occupied_by": None, "time_remaining": 0, "queue": []},
         ]
         self.audit_log: List[Dict[str, Any]] = []
         self.request_log: List[Dict[str, Any]] = []

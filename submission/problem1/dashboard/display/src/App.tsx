@@ -2,15 +2,19 @@ import "./App.css";
 import "leaflet/dist/leaflet.css";
 
 import { useEffect, useMemo, useState } from "react";
+import L from "leaflet";
+import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import {
   MapContainer,
   TileLayer,
-  CircleMarker,
+  Marker,
   Popup,
   Polyline,
+  Rectangle,
   Tooltip,
   useMap,
 } from "react-leaflet";
+import RequestPage from "./pages/RequestPage";
 
 type Location = {
   lat: number;
@@ -34,10 +38,15 @@ type Drone = {
 
 type Pad = {
   id: number;
+  lat?: number;
+  lng?: number;
   occupied_by: number | null;
   time_remaining: number;
   queue: number[];
 };
+
+const BASE_LAT = 31.7812939;
+const BASE_LNG = 76.997502;
 
 const LOW_BATTERY_THRESHOLD = 25;
 
@@ -75,6 +84,37 @@ const normalizeState = (drone: Drone) => {
   return "IDLE";
 };
 
+const droneIcon = (drone: Drone, selected: boolean) => {
+  const color = stateColor(drone);
+  const size = selected ? 30 : 26;
+  return L.divIcon({
+    className: "drone-div-icon",
+    html: `<div class="drone-badge ${selected ? "selected" : ""}" style="width:${size}px;height:${size}px;background:${color};border-color:${color}">${drone.id}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+};
+
+const destinationIcon = (droneId: number) => {
+  return L.divIcon({
+    className: "dest-div-icon",
+    html: `<div class="dest-badge"><span>${droneId}</span></div>`,
+    iconSize: [30, 28],
+    iconAnchor: [15, 14],
+  });
+};
+
+const padIcon = (padId: number, occupied: boolean) => {
+  const color = occupied ? "#0072BD" : "#22C55E";
+  const border = occupied ? "#0072BD" : "#16A34A";
+  return L.divIcon({
+    className: "pad-div-icon",
+    html: `<div class="pad-diamond" style="background:${color};border-color:${border}"><span>${padId}</span></div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+};
+
 function FocusDrone({ drone }: { drone: Drone | null }) {
   const map = useMap();
 
@@ -89,7 +129,7 @@ function FocusDrone({ drone }: { drone: Drone | null }) {
   return null;
 }
 
-export default function App() {
+function Dashboard() {
   const [drones, setDrones] = useState<Drone[]>([]);
   const [chargingPads, setChargingPads] = useState<Pad[]>([]);
   const [queuedRequests, setQueuedRequests] = useState<Array<{ package_id: string; status: string }>>([]);
@@ -154,7 +194,7 @@ export default function App() {
         <div className="brand">
           <div className="brand-mark" />
           <div>
-            <h1>FleetOps</h1>
+            <h1>Drone Fleet Management</h1>
             <p>Autonomous Drone Control</p>
           </div>
         </div>
@@ -163,6 +203,12 @@ export default function App() {
           <span>Critical Alerts</span>
           <strong>{metrics.lowBattery}</strong>
           <p>Low battery drones require attention</p>
+        </div>
+
+        <div className="fleet-groups">
+          <Link to="/request" className="nav-link nav-cta">
+            <span>+ Request delivery</span>
+          </Link>
         </div>
 
         <div className="fleet-groups">
@@ -302,6 +348,54 @@ export default function App() {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
+            <Rectangle
+              bounds={[
+                [BASE_LAT - 0.00015, BASE_LNG - 0.00015],
+                [BASE_LAT + 0.00015, BASE_LNG + 0.00015],
+              ]}
+              color="#0072BD"
+              fillColor="#0072BD"
+              fillOpacity={0.3}
+              weight={2}
+            >
+              <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                <strong>BASE STATION</strong>
+              </Tooltip>
+              <Popup>
+                <strong>BASE STATION</strong>
+                <br />
+                Lat: {BASE_LAT}
+                <br />
+                Lng: {BASE_LNG}
+              </Popup>
+            </Rectangle>
+
+            {chargingPads.map((pad) => {
+              const occupied = pad.occupied_by != null;
+              return (
+                <Marker
+                  key={`pad-${pad.id}`}
+                  position={[pad.lat ?? BASE_LAT, pad.lng ?? BASE_LNG]}
+                  icon={padIcon(pad.id, occupied)}
+                >
+                  <Tooltip direction="top" offset={[0, -12]} opacity={1}>
+                    <strong>Pad {pad.id}</strong>
+                    <br />
+                    {occupied ? `Occupied by Drone ${pad.occupied_by}` : "Available"}
+                  </Tooltip>
+                  <Popup>
+                    <strong>Charging Pad {pad.id}</strong>
+                    <br />
+                    Status: {occupied ? `Occupied by Drone ${pad.occupied_by}` : "Available"}
+                    <br />
+                    Time remaining: {pad.time_remaining} min
+                    <br />
+                    Queue: {pad.queue.length === 0 ? "empty" : pad.queue.join(", ")}
+                  </Popup>
+                </Marker>
+              );
+            })}
+
             {visibleDrones.map((drone) => {
               const path: [number, number][] = [
                 [drone.base.lat, drone.base.lng],
@@ -323,13 +417,9 @@ export default function App() {
                     />
                   )}
 
-                  <CircleMarker
-                    center={[drone.position.lat, drone.position.lng]}
-                    radius={selected ? 9 : 6}
-                    color={stateColor(drone)}
-                    fillColor={stateColor(drone)}
-                    fillOpacity={0.9}
-                    weight={selected ? 3 : 1}
+                  <Marker
+                    position={[drone.position.lat, drone.position.lng]}
+                    icon={droneIcon(drone, selected)}
                     eventHandlers={{
                       click: () => setSelectedDrone(drone),
                     }}
@@ -355,13 +445,75 @@ export default function App() {
                       <br />
                       Destination: {drone.destination.address}
                     </Popup>
-                  </CircleMarker>
+                  </Marker>
+
+                  <Marker
+                    position={[drone.destination.lat, drone.destination.lng]}
+                    icon={destinationIcon(drone.id)}
+                  >
+                    <Tooltip direction="top" offset={[0, -14]} opacity={1}>
+                      <strong>Destination for Drone #{drone.id}</strong>
+                      <br />
+                      {drone.destination.address}
+                    </Tooltip>
+                    <Popup>
+                      <strong>Destination for Drone #{drone.id}</strong>
+                      <br />
+                      {drone.destination.address}
+                    </Popup>
+                  </Marker>
                 </div>
               );
             })}
           </MapContainer>
+          <div className="map-legend">
+            <h4>Legend</h4>
+            <div className="legend-row">
+              <span className="legend-swatch legend-square" />
+              <span>Base station</span>
+            </div>
+            <div className="legend-row">
+              <span className="legend-swatch legend-pad-free" />
+              <span>Pad available</span>
+            </div>
+            <div className="legend-row">
+              <span className="legend-swatch legend-pad-occupied" />
+              <span>Pad occupied</span>
+            </div>
+            <div className="legend-row">
+              <span className="legend-swatch legend-drone-active" />
+              <span>Drone active</span>
+            </div>
+            <div className="legend-row">
+              <span className="legend-swatch legend-drone-returning" />
+              <span>Drone returning</span>
+            </div>
+            <div className="legend-row">
+              <span className="legend-swatch legend-drone-idle" />
+              <span>Drone idle / charging</span>
+            </div>
+            <div className="legend-row">
+              <span className="legend-swatch legend-drone-low" />
+              <span>Drone low battery</span>
+            </div>
+            <div className="legend-row">
+              <span className="legend-swatch legend-destination" />
+              <span>Destination (drone #)</span>
+            </div>
+          </div>
         </section>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/request" element={<RequestPage />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

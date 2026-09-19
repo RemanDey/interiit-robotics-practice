@@ -21,7 +21,7 @@ using std::cout;
 using std::endl;
 using std::vector;
 
-const int NUM_OF_DRONES = 10;
+const int NUM_OF_DRONES = 1;
 const double CRUISE_ALTITUDE = 30.0;
 const int DELIVERY_WAIT_TICKS = 3;
 
